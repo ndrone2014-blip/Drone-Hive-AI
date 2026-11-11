@@ -11,7 +11,10 @@ import { ollamaProvider } from './ollama.js';
  * Nothing else in the app needs to change — the frontend reads the list
  * from /api/status.
  */
-export const PROVIDERS = [anthropicProvider, ollamaProvider, openAICompatibleProvider];
+// Order = priority when AI_PROVIDER is "auto". Ollama comes first because
+// Netlify's AI Gateway auto-injects an Anthropic key on every site, which
+// would otherwise take over (and spend Netlify credits) without you asking.
+export const PROVIDERS = [ollamaProvider, anthropicProvider, openAICompatibleProvider];
 
 export function getProvider(id) {
   return PROVIDERS.find((p) => p.id === id) || null;

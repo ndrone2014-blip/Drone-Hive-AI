@@ -6,6 +6,11 @@
   publish = "public"
   edge_functions = "netlify/edge-functions"
 
+# AI_PROVIDER only holds a provider name (e.g. "ollama") that also appears in
+# the code, so Netlify's secret scanner must not treat it as a leaked secret.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "AI_PROVIDER"
+
 [dev]
   publish = "public"
   port = 8888
