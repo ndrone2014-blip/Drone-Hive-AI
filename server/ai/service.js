@@ -110,8 +110,21 @@ export async function openChat(body, { signal, budget = Infinity } = {}) {
   const timeout = AbortSignal.timeout(cfg.maxReplySeconds * 1000);
   const combined = signal ? anySignal([signal, timeout]) : timeout;
 
-  const events = await provider.open({ model, system, messages, maxTokens, temperature, signal: combined });
-  return { provider: { id: provider.id, name: provider.name }, model, events, maxTokens, inputTokensEstimate };
+  // If the chosen model is overloaded or rate limited, automatically try the
+  // other models this server allows (e.g. Gemini Flash → Flash-Lite).
+  const candidates = [model, ...pcfg.models.filter((m) => m !== model)];
+  let lastError;
+  for (const m of candidates) {
+    try {
+      const events = await provider.open({ model: m, system, messages, maxTokens, temperature, signal: combined });
+      return { provider: { id: provider.id, name: provider.name }, model: m, events, maxTokens, inputTokensEstimate };
+    } catch (err) {
+      lastError = err;
+      const retryable = err instanceof AIError && (err.code === ERROR_CODES.PROVIDER_UNAVAILABLE || err.code === ERROR_CODES.RATE_LIMITED);
+      if (!retryable || combined.aborted) throw err;
+    }
+  }
+  throw lastError;
 }
 
 function fitToInputBudget(messages, system, maxInputTokens) {
