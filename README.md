@@ -96,15 +96,38 @@ OPENAI_COMPAT_MODEL=model-id
 
 Netlify automatically adds a Claude connection to every site and bills it to your Netlify credits. Drone Hive AI **ignores it**, so it never spends your credits. To allow it on purpose, set `ALLOW_NETLIFY_AI_GATEWAY=true`.
 
-### Protect your key (recommended once the site is public)
+## 🔒 Security & token limits
 
-Anyone who finds your site could use your AI credits. To stop that, set an access code:
+Built in, no setup needed:
+
+| Protection | What it stops |
+|---|---|
+| Netlify rate limit (10 chats/min per IP, enforced by Netlify) | Bots hammering the API |
+| Per-visitor limits: 6 messages/min, 100/day, 150k tokens/day | One person draining your AI usage |
+| Max 2,048 tokens per reply, ~12k tokens per request, 2-minute reply cap | Single huge or endless requests |
+| Same-origin check | Other websites using your AI through their visitors |
+| Strict Content-Security-Policy + safe Markdown renderer | Injected scripts (XSS) |
+| API keys only on the server, provider error details never sent to browsers | Key / info leaks |
+| Access code: constant-time check, 5 wrong tries = 15-minute lockout | Guessing the code |
+
+All limits can be changed with environment variables — see [`.env.example`](.env.example).
+
+### Lock the AI with an access code (strongly recommended)
+
+The limits above slow strangers down; an access code shuts them out completely. In Netlify → Environment variables add (marked as secret):
 
 ```
-DRONEHIVE_ACCESS_CODE=pick-a-secret-code
+DRONEHIVE_ACCESS_CODE=use-12-or-more-random-characters
 ```
 
-Then enter the same code in the app under **Settings → AI Configuration → Access code**.
+Then enter the same code in the app under **Settings → AI Configuration → Access code**, and only share it with people you trust.
+
+### Make sure nobody can cost you money
+
+- **Don't put a payment card on your AI provider account** (or set a hard monthly spend limit there). On a free plan, the worst case is hitting the free limit — never a bill.
+- **Stay on Netlify's free plan** with no card, so too much traffic pauses the site instead of charging you.
+- **Turn on two-factor login** for GitHub, Netlify and your AI provider. Those logins are where your keys actually live.
+- **Never put keys in `/public` or commit `.env`** (it's already in `.gitignore`). If a key ever leaks, delete it at the provider and make a new one.
 
 ### All settings
 
@@ -240,7 +263,8 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `UNAUTHORIZED`, `PROV
 - Provider registry with Anthropic Claude, Ollama (cloud or local) and any OpenAI-compatible API
 - Shared message format, streaming and non-streaming modes, and stable error codes
 - The server allowlists which models can be requested, caps reply length and enforces message size limits
-- Optional access code to protect your key
+- Optional access code to protect your key (constant-time check + lockout)
+- Rate limits, daily token budgets and per-request token caps
 - Connection status endpoint and status pill
 - 12 automated backend tests
 

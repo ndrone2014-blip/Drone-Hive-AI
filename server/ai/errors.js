@@ -3,16 +3,19 @@
  * `code` is stable and the frontend switches on it; `message` is human-readable.
  */
 export class AIError extends Error {
-  constructor(code, message, status = 500, details = undefined) {
+  constructor(code, message, status = 500, details = undefined, headers = undefined) {
     super(message);
     this.name = 'AIError';
     this.code = code;
     this.status = status;
+    // `details` holds raw provider output. It is only logged on the server and
+    // never sent to the browser (it could reveal internals useful to attackers).
     this.details = details;
+    this.headers = headers;
   }
 
   toJSON() {
-    return { code: this.code, message: this.message, ...(this.details ? { details: this.details } : {}) };
+    return { code: this.code, message: this.message };
   }
 }
 
@@ -20,6 +23,8 @@ export const ERROR_CODES = {
   PROVIDER_NOT_CONFIGURED: 'PROVIDER_NOT_CONFIGURED',
   INVALID_REQUEST: 'INVALID_REQUEST',
   UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
+  INPUT_TOO_LARGE: 'INPUT_TOO_LARGE',
   PROVIDER_AUTH: 'PROVIDER_AUTH',
   RATE_LIMITED: 'RATE_LIMITED',
   MODEL_NOT_FOUND: 'MODEL_NOT_FOUND',
@@ -73,5 +78,6 @@ export async function errorFromProviderResponse(res, providerName) {
 export function toAIError(err) {
   if (err instanceof AIError) return err;
   if (err?.name === 'AbortError') return new AIError(ERROR_CODES.ABORTED, 'The request was cancelled.', 499);
+  if (err?.name === 'TimeoutError') return new AIError(ERROR_CODES.PROVIDER_UNAVAILABLE, 'The reply took too long and was stopped.', 504);
   return new AIError(ERROR_CODES.PROVIDER_ERROR, 'Could not reach the AI provider. Please try again.', 502, String(err?.message || err).slice(0, 200));
 }

@@ -175,7 +175,7 @@ export class SettingsModal {
     const selected = providers.find((p) => p.id === s.provider && p.configured) || this.connection.activeProvider;
     const models = selected?.models || [];
     const model = models.includes(s.model) ? s.model : selected?.defaultModel || '';
-    const maxOut = status?.limits?.maxOutputTokens || 4096;
+    const maxOut = status?.limits?.maxOutputTokens || 2048;
 
     const stateInfo = {
       connected: ['Connected', `Replies are powered by ${escapeHtml(this.connection.activeProvider?.name || 'your AI provider')}.`],
