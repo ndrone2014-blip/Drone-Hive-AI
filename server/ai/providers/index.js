@@ -1,5 +1,6 @@
 import { anthropicProvider } from './anthropic.js';
 import { openAICompatibleProvider } from './openai-compatible.js';
+import { ollamaProvider } from './ollama.js';
 
 /**
  * Provider registry. To add a new AI provider:
@@ -10,7 +11,7 @@ import { openAICompatibleProvider } from './openai-compatible.js';
  * Nothing else in the app needs to change — the frontend reads the list
  * from /api/status.
  */
-export const PROVIDERS = [anthropicProvider, openAICompatibleProvider];
+export const PROVIDERS = [anthropicProvider, ollamaProvider, openAICompatibleProvider];
 
 export function getProvider(id) {
   return PROVIDERS.find((p) => p.id === id) || null;

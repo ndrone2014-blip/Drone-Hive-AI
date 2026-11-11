@@ -71,9 +71,19 @@ API keys **only** go in server environment variables. Never put them in any file
 
 > Note: Anthropic bills API usage per request. Nothing in this project requires it. The app runs fine without any key, and you choose if and when to connect one.
 
-### Option B: any OpenAI-compatible API
+### Option B: Ollama
 
-Many AI services, including some with free tiers and local tools like Ollama, use the "OpenAI-compatible" format. Set these variables:
+1. Create a key at [ollama.com](https://ollama.com) (Settings → Keys).
+2. Add the environment variable `OLLAMA_API_KEY` with that key. Use the same Netlify steps as above, or put it in `.env` on your PC.
+3. Redeploy. The default model is `gpt-oss:120b`, and `gpt-oss:20b` is also listed. To use other models, set `OLLAMA_MODEL` / `OLLAMA_MODELS` with the exact names from ollama.com.
+
+Running Ollama on your own PC instead? Set `OLLAMA_BASE_URL=http://localhost:11434/v1` in `.env`. No key is needed. This only works with `npm start` on that PC, not on Netlify.
+
+> Check Ollama's site for their current free usage limits and pricing.
+
+### Option C: any other OpenAI-compatible API
+
+Many AI services, including some with free tiers, use the "OpenAI-compatible" format. Set these variables:
 
 ```
 OPENAI_COMPAT_NAME=My Provider
@@ -142,6 +152,7 @@ Drone-Hive-AI/
 │       └── providers/
 │           ├── index.js        provider registry (add new providers here)
 │           ├── anthropic.js
+│           ├── ollama.js
 │           └── openai-compatible.js
 ├── netlify/edge-functions/     ← Netlify entry points
 │   ├── chat.js                 POST /api/chat
@@ -222,12 +233,12 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `UNAUTHORIZED`, `PROV
 
 **AI backend**
 - Dedicated AI service, separate from the frontend
-- Provider registry with Anthropic Claude and any OpenAI-compatible API
+- Provider registry with Anthropic Claude, Ollama (cloud or local) and any OpenAI-compatible API
 - Shared message format, streaming and non-streaming modes, and stable error codes
 - The server allowlists which models can be requested, caps reply length and enforces message size limits
 - Optional access code to protect your key
 - Connection status endpoint and status pill
-- 10 automated backend tests
+- 11 automated backend tests
 
 ## 🔜 Left for future development
 

@@ -234,9 +234,10 @@ export class SettingsModal {
         <details class="howto">
           <summary>How to add your API key</summary>
           <ol>
-            <li><b>On Netlify:</b> Project (or Site) configuration → Environment variables → Add a variable. Name it <code>ANTHROPIC_API_KEY</code> (scope must include Functions), paste your key, then redeploy.</li>
-            <li><b>On your PC:</b> copy <code>.env.example</code> to <code>.env</code>, set <code>ANTHROPIC_API_KEY=…</code>, and restart <code>npm start</code>.</li>
-            <li>Other providers: set the <code>OPENAI_COMPAT_*</code> variables instead (see the README).</li>
+            <li><b>On Netlify:</b> Project (or Site) configuration → Environment variables → Add a variable. Name it <code>ANTHROPIC_API_KEY</code> or <code>OLLAMA_API_KEY</code> (scope must include Functions), paste your key, then redeploy.</li>
+            <li><b>On your PC:</b> copy <code>.env.example</code> to <code>.env</code>, set your key (e.g. <code>OLLAMA_API_KEY=…</code>), and restart <code>npm start</code>.</li>
+            <li><b>Ollama:</b> use the variable name <code>OLLAMA_API_KEY</code> instead.</li>
+            <li>Other providers: set the <code>OPENAI_COMPAT_*</code> variables (see the README).</li>
           </ol>
         </details>
         ${status?.accessCodeRequired || s.accessCode ? `

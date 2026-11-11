@@ -37,24 +37,29 @@ export const openAICompatibleProvider = {
     if (!cfg.configured) {
       throw new AIError(ERROR_CODES.PROVIDER_NOT_CONFIGURED, 'OpenAI-compatible provider needs OPENAI_COMPAT_BASE_URL, OPENAI_COMPAT_API_KEY and OPENAI_COMPAT_MODEL.', 503);
     }
-    const body = {
-      model,
-      messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: m.content }))],
-      max_tokens: maxTokens,
-      stream: true,
-    };
-    if (typeof temperature === 'number') body.temperature = temperature;
-
-    const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify(body),
-      signal,
-    });
-    if (!res.ok || !res.body) throw await errorFromProviderResponse(res, this.name);
-    return streamEvents(res.body, this.name);
+    return openChatCompletions({ ...cfg, providerName: this.name, model, system, messages, maxTokens, temperature, signal });
   },
 };
+
+/**
+ * Shared helper: sends a streaming /chat/completions request and returns the
+ * normalized event iterator. Used by every OpenAI-format provider (incl. Ollama).
+ */
+export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal }) {
+  const body = {
+    model,
+    messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: m.content }))],
+    max_tokens: maxTokens,
+    stream: true,
+  };
+  if (typeof temperature === 'number') body.temperature = temperature;
+
+  const headers = { 'content-type': 'application/json' };
+  if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+  const res = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', headers, body: JSON.stringify(body), signal });
+  if (!res.ok || !res.body) throw await errorFromProviderResponse(res, providerName);
+  return streamEvents(res.body, providerName);
+}
 
 async function* streamEvents(body, providerName) {
   let stopReason = null;

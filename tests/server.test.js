@@ -9,7 +9,7 @@ import { handleChatRequest, handleStatusRequest } from '../server/handlers.js';
 import { normalizeMessages } from '../server/ai/messages.js';
 import { parseSSE } from '../server/ai/sse.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER'];
+const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS'];
 const realFetch = globalThis.fetch;
 let saved;
 
@@ -146,6 +146,23 @@ test('openai-compatible provider streams chat completions format', async () => {
   const events = await readNDJSON(res);
   assert.equal(url, 'https://example.test/v1/chat/completions');
   assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Yo!');
+});
+
+test('ollama provider uses Ollama Cloud with only OLLAMA_API_KEY set', async () => {
+  process.env.OLLAMA_API_KEY = 'ollama-key';
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    sent = { url, init, body: JSON.parse(init.body) };
+    return new Response('data: {"choices":[{"delta":{"content":"Buzz"}}]}\n\ndata: [DONE]\n\n', { status: 200 });
+  };
+  const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(status.activeProvider, 'ollama');
+  const res = await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hi' }] }));
+  const events = await readNDJSON(res);
+  assert.equal(sent.url, 'https://ollama.com/v1/chat/completions');
+  assert.equal(sent.init.headers.authorization, 'Bearer ollama-key');
+  assert.equal(sent.body.model, 'gpt-oss:120b');
+  assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Buzz');
 });
 
 test('normalizeMessages enforces limits', () => {
