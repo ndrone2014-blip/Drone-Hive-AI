@@ -309,3 +309,11 @@ test('provider error details are never sent to the browser', async () => {
   assert.equal(body.error.details, undefined);
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
 });
+
+test('access code ignores accidental spaces', async () => {
+  process.env.ANTHROPIC_API_KEY = 'k';
+  process.env.DRONEHIVE_ACCESS_CODE = 'hive123';
+  globalThis.fetch = async () => okStream();
+  const r = await handleChatRequest(chatReq(msg(), { 'x-dronehive-access': '  hive123 ' }));
+  assert.equal(r.status, 200);
+});

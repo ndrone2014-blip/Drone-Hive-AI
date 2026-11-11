@@ -129,7 +129,7 @@ export async function enforceAccessCode(req, key, accessCode, now = Date.now()) 
   if (v.lockedUntil > now) {
     throw tooMany('Too many wrong access codes. Try again in 15 minutes.', (v.lockedUntil - now) / 1000);
   }
-  const sent = (req.headers.get('x-dronehive-access') || '').slice(0, 256);
+  const sent = (req.headers.get('x-dronehive-access') || '').trim().slice(0, 256);
   if (sent && (await safeEqual(sent, accessCode))) {
     v.failed = 0;
     return;
