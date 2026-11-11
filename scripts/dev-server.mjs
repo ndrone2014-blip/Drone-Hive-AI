@@ -19,6 +19,9 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 
 loadDotEnv(path.join(ROOT, '.env'));
 const PORT = Number(process.env.PORT) || 8888;
+// Only reachable from this computer unless you set HOST=0.0.0.0 on purpose.
+const HOST = process.env.HOST || '127.0.0.1';
+const MAX_BODY_BYTES = 512 * 1024;
 
 const { handleChatRequest, handleStatusRequest } = await import(pathToFileURL(path.join(ROOT, 'server', 'handlers.js')).href);
 
@@ -59,7 +62,15 @@ async function runHandler(handler, req, res, url) {
   });
 
   const chunks = [];
-  for await (const c of req) chunks.push(c);
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > MAX_BODY_BYTES) {
+      req.destroy();
+      return send(res, 413, 'application/json', JSON.stringify({ error: { code: 'INVALID_REQUEST', message: 'Request is too large.' } }));
+    }
+    chunks.push(c);
+  }
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
 
   const request = new Request(url, {
@@ -68,7 +79,7 @@ async function runHandler(handler, req, res, url) {
     body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,
     signal: controller.signal,
   });
-  const response = await handler(request);
+  const response = await handler(request, { ip: req.socket.remoteAddress });
 
   res.writeHead(response.status, Object.fromEntries(response.headers));
   if (!response.body) return res.end();
@@ -78,10 +89,15 @@ async function runHandler(handler, req, res, url) {
 }
 
 async function serveStatic(pathname, res) {
-  let rel = decodeURIComponent(pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    return send(res, 400, 'text/plain', 'Bad request');
+  }
   if (rel.endsWith('/')) rel += 'index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
-  if (!file.startsWith(PUBLIC_DIR)) return send(res, 403, 'text/plain', 'Forbidden');
+  if (file !== PUBLIC_DIR && !file.startsWith(PUBLIC_DIR + path.sep)) return send(res, 403, 'text/plain', 'Forbidden');
 
   let target = file;
   try {
@@ -116,7 +132,7 @@ function loadDotEnv(file) {
   }
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n  🐝 Drone Hive AI is running at http://localhost:${PORT}\n`);
   import(pathToFileURL(path.join(ROOT, 'server', 'ai', 'service.js')).href).then(({ getStatus }) => {
     const s = getStatus();

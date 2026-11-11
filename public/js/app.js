@@ -296,7 +296,7 @@ export class App {
           customInstructions: s.customInstructions || undefined,
         },
         stream: s.streamResponses,
-        accessCode: s.accessCode || undefined,
+        accessCode: (s.accessCode || '').trim() || undefined,
         signal: controller.signal,
         onEvent: (ev) => {
           if (ev.type === 'start') meta = { provider: ev.provider?.id, model: ev.model };

@@ -28,12 +28,18 @@ export function getServerConfig() {
     accessCode: getEnv('DRONEHIVE_ACCESS_CODE', ''),
     systemPrompt: getEnv('AI_SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT),
     allowCustomInstructions: getEnv('AI_ALLOW_CUSTOM_INSTRUCTIONS', 'true') !== 'false',
-    maxOutputTokens: getEnvInt('AI_MAX_OUTPUT_TOKENS', { min: 256, max: 64000, fallback: 4096 }),
+    // ── Token limits (protect your AI usage) ──
+    // Max tokens the AI may write per reply.
+    maxOutputTokens: getEnvInt('AI_MAX_OUTPUT_TOKENS', { min: 256, max: 16000, fallback: 2048 }),
+    // Max tokens (estimated) a single request may send: system prompt + chat history.
+    maxInputTokens: getEnvInt('AI_MAX_INPUT_TOKENS', { min: 1000, max: 100000, fallback: 12000 }),
+    // Stop any single reply that runs longer than this many seconds.
+    maxReplySeconds: getEnvInt('AI_MAX_REPLY_SECONDS', { min: 10, max: 600, fallback: 120 }),
     limits: {
-      maxMessages: 100, // most recent messages sent to the model
-      maxMessageChars: 32000, // per message
-      maxTotalChars: 200000, // whole conversation
-      maxCustomInstructionChars: 4000,
+      maxMessages: 40, // most recent messages sent to the model
+      maxMessageChars: getEnvInt('AI_MAX_MESSAGE_CHARS', { min: 500, max: 100000, fallback: 16000 }), // per message
+      maxTotalChars: 300000, // sanity cap on the raw conversation; older messages are then trimmed to fit maxInputTokens
+      maxCustomInstructionChars: 2000,
     },
   };
 }

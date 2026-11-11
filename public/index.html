@@ -14,18 +14,7 @@
   <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <!-- Apply saved theme before paint to avoid a flash -->
-  <script>
-    (function () {
-      try {
-        var s = JSON.parse(localStorage.getItem('dhai.settings.v1') || '{}');
-        var t = s.theme || 'system';
-        if (t === 'system') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        document.documentElement.dataset.theme = t;
-        if (s.fontSize) document.documentElement.dataset.fontSize = s.fontSize;
-        if (s.sidebarCollapsed) document.documentElement.classList.add('sidebar-collapsed');
-      } catch (e) {}
-    })();
-  </script>
+  <script src="/js/theme-init.js"></script>
   <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/sidebar.css">
@@ -107,7 +96,7 @@
     </main>
   </div>
 
-  <noscript><p style="padding:2rem;font-family:sans-serif">Drone Hive AI needs JavaScript enabled.</p></noscript>
+  <noscript><p class="noscript">Drone Hive AI needs JavaScript enabled.</p></noscript>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

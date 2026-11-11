@@ -154,3 +154,4 @@ kbd {
 
 .fatal { max-width: 460px; margin: 20vh auto; text-align: center; color: var(--text-2); }
 .fatal h2 { color: var(--text); }
+.noscript { padding: 2rem; font-family: sans-serif; }

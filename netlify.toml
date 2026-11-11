@@ -15,14 +15,23 @@
   publish = "public"
   port = 8888
 
-# Security headers for the app pages
+# Security headers for the app pages.
+# (The /api endpoints set their own headers in server/security.js, because
+# Netlify doesn't apply these to Edge Functions.)
+#  - Content-Security-Policy: the browser only runs scripts from this site and
+#    only talks to this site, so injected code can't run or send data elsewhere.
+#  - Strict-Transport-Security: always HTTPS.
 [[headers]]
   for = "/*"
   [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(), geolocation=()"
+    Permissions-Policy = "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
 
 [[headers]]
   for = "/assets/*"

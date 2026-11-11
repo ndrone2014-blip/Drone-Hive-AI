@@ -3,4 +3,11 @@ import { handleStatusRequest } from '../../server/handlers.js';
 
 export default (request) => handleStatusRequest(request);
 
-export const config = { path: '/api/status' };
+export const config = {
+  path: '/api/status',
+  rateLimit: {
+    windowLimit: 30,
+    windowSize: 60,
+    aggregateBy: ['ip', 'domain'],
+  },
+};

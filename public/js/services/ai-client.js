@@ -65,6 +65,10 @@ export async function sendChat({ messages, provider, model, options, stream = tr
       const data = await res.json().catch(() => ({}));
       throw new AIClientError(data?.error?.code || 'SERVER_ERROR', data?.error?.message || `Server error (HTTP ${res.status}).`, res.status);
     }
+    // Netlify's built-in rate limiter answers with a plain (non-JSON) 429.
+    if (res.status === 429) {
+      throw new AIClientError('RATE_LIMITED', 'You’re sending messages too fast. Wait a minute and try again.', 429);
+    }
     // 404 / HTML response = the API isn't running at this address.
     throw new AIClientError('BACKEND_UNAVAILABLE', 'The Drone Hive AI server is not running at this address.', res.status);
   }
