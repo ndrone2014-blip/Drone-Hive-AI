@@ -63,10 +63,10 @@ export async function errorFromProviderResponse(res, providerName) {
     return new AIError(ERROR_CODES.PROVIDER_AUTH, `${providerName} rejected the API key. Check that it is correct and active.`, 502, detail);
   }
   if (s === 402) {
-    return new AIError(ERROR_CODES.RATE_LIMITED, `Your ${providerName} account has used up its free usage for now. It resets automatically (Ollama's free plan resets every few hours, with a weekly limit too). Try again later.`, 429, detail);
+    return new AIError(ERROR_CODES.RATE_LIMITED, `Your ${providerName} account has used up its free usage for now. It resets automatically after a while. Try again later.`, 429, detail);
   }
   if (s === 429) {
-    return new AIError(ERROR_CODES.RATE_LIMITED, `${providerName} is rate limiting requests or your usage limit was reached. Try again shortly.`, 429, detail);
+    return new AIError(ERROR_CODES.RATE_LIMITED, `${providerName} is rate limiting requests or the free usage limit was reached. Try again shortly.`, 429, detail);
   }
   if (s === 404) {
     return new AIError(ERROR_CODES.MODEL_NOT_FOUND, `${providerName} could not find that model. Pick another model in Settings.`, 502, detail);

@@ -81,7 +81,17 @@ Running Ollama on your own PC instead? Set `OLLAMA_BASE_URL=http://localhost:114
 
 > Check Ollama's site for their current free usage limits and pricing.
 
-### Option C: any other OpenAI-compatible API
+### Option C: Groq (free plan)
+
+1. Sign in at [console.groq.com](https://console.groq.com) and create a key under **API Keys** (it starts with `gsk_`). The free plan needs no credit card.
+2. Add the environment variable `GROQ_API_KEY` with that key (mark it as a secret on Netlify, scope must include Functions). Use the same Netlify steps as above, or put it in `.env` on your PC.
+3. Redeploy. The default model is `openai/gpt-oss-120b`; `llama-3.3-70b-versatile` and `openai/gpt-oss-20b` are also listed. To change them, set `GROQ_MODEL` / `GROQ_MODELS` with exact IDs from [console.groq.com/docs/models](https://console.groq.com/docs/models).
+
+When `AI_PROVIDER` is `auto`, Groq is used first if its key is set. If you also have Ollama set up and want that instead, set `AI_PROVIDER=ollama`.
+
+> The free plan has per-minute and per-day limits. When they're hit, the app shows a "try again shortly" message instead of charging anything.
+
+### Option D: any other OpenAI-compatible API
 
 Many AI services, including some with free tiers, use the "OpenAI-compatible" format. Set these variables:
 
@@ -210,6 +220,7 @@ Drone-Hive-AI/
 │       └── providers/
 │           ├── index.js        provider registry (add new providers here)
 │           ├── anthropic.js
+│           ├── groq.js
 │           ├── ollama.js
 │           └── openai-compatible.js
 ├── netlify/edge-functions/     ← Netlify entry points
@@ -291,7 +302,7 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `UNAUTHORIZED`, `PROV
 
 **AI backend**
 - Dedicated AI service, separate from the frontend
-- Provider registry with Anthropic Claude, Ollama (cloud or local) and any OpenAI-compatible API
+- Provider registry with Groq, Anthropic Claude, Ollama (cloud or local) and any OpenAI-compatible API
 - Shared message format, streaming and non-streaming modes, and stable error codes
 - The server allowlists which models can be requested, caps reply length and enforces message size limits
 - Optional access code to protect your key (constant-time check + lockout)

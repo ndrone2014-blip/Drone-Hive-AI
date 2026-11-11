@@ -11,7 +11,7 @@ import { parseSSE } from '../server/ai/sse.js';
 import { _resetSecurityState } from '../server/security.js';
 import { _setAuthKeys, _resetAuthKeys } from '../server/auth.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED'];
+const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODELS', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED'];
 const realFetch = globalThis.fetch;
 let saved;
 
@@ -169,6 +169,32 @@ test('ollama provider uses Ollama Cloud with only OLLAMA_API_KEY set', async () 
   assert.equal(sent.init.headers.authorization, 'Bearer ollama-key');
   assert.equal(sent.body.model, 'gpt-oss:120b');
   assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Buzz');
+});
+
+test('groq provider works with only GROQ_API_KEY set', async () => {
+  process.env.GROQ_API_KEY = 'gsk_test';
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    sent = { url, init, body: JSON.parse(init.body) };
+    return new Response('data: {"choices":[{"delta":{"content":"Fast"}}]}\n\ndata: [DONE]\n\n', { status: 200 });
+  };
+  const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(status.activeProvider, 'groq');
+  assert.ok(!JSON.stringify(status).includes('gsk_test'), 'API key must never appear in /api/status');
+  const res = await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hi' }] }));
+  const events = await readNDJSON(res);
+  assert.equal(sent.url, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(sent.init.headers.authorization, 'Bearer gsk_test');
+  assert.equal(sent.body.model, 'openai/gpt-oss-120b');
+  assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Fast');
+});
+
+test('AI_PROVIDER=ollama picks Ollama even when Groq is also set', async () => {
+  process.env.GROQ_API_KEY = 'gsk_test';
+  process.env.OLLAMA_API_KEY = 'ollama-key';
+  process.env.AI_PROVIDER = 'ollama';
+  const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(status.activeProvider, 'ollama');
 });
 
 test('Netlify AI Gateway (auto-injected Claude) is blocked so it never spends Netlify credits', async () => {
