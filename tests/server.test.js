@@ -9,7 +9,7 @@ import { handleChatRequest, handleStatusRequest } from '../server/handlers.js';
 import { normalizeMessages } from '../server/ai/messages.js';
 import { parseSSE } from '../server/ai/sse.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS'];
+const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY'];
 const realFetch = globalThis.fetch;
 let saved;
 
@@ -163,6 +163,25 @@ test('ollama provider uses Ollama Cloud with only OLLAMA_API_KEY set', async () 
   assert.equal(sent.init.headers.authorization, 'Bearer ollama-key');
   assert.equal(sent.body.model, 'gpt-oss:120b');
   assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Buzz');
+});
+
+test('Netlify AI Gateway (auto-injected Claude) is blocked so it never spends Netlify credits', async () => {
+  process.env.NETLIFY_AI_GATEWAY_KEY = 'gw-key';
+  process.env.NETLIFY_AI_GATEWAY_BASE_URL = 'https://gateway.netlify.test';
+  process.env.ANTHROPIC_API_KEY = 'gw-placeholder';
+  process.env.ANTHROPIC_BASE_URL = 'https://gateway.netlify.test/anthropic';
+  let called = false;
+  globalThis.fetch = async () => { called = true; return new Response('', { status: 500 }); };
+  const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(status.providers.find((p) => p.id === 'anthropic').configured, false);
+  assert.equal(status.connected, false);
+  const res = await handleChatRequest(chatReq({ provider: 'anthropic', messages: [{ role: 'user', content: 'hi' }] }));
+  assert.equal(res.status, 503);
+  assert.equal(called, false, 'no request may reach the gateway');
+
+  process.env.ALLOW_NETLIFY_AI_GATEWAY = 'true';
+  const status2 = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(status2.activeProvider, 'anthropic', 'gateway works only when explicitly allowed');
 });
 
 test('normalizeMessages enforces limits', () => {

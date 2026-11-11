@@ -22,10 +22,25 @@ export const anthropicProvider = {
     const apiKey = getEnv('ANTHROPIC_API_KEY');
     const listed = getEnvList('ANTHROPIC_MODELS') || DEFAULT_MODELS;
     const defaultModel = getEnv('ANTHROPIC_MODEL', listed[0]);
+
+    // Netlify's AI Gateway auto-injects ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL into
+    // every site and bills usage to your Netlify credits. It is BLOCKED unless you
+    // opt in with ALLOW_NETLIFY_AI_GATEWAY=true. On Netlify (gateway vars present)
+    // requests always go straight to Anthropic, never through the gateway.
+    const onNetlifyGateway = Boolean(getEnv('NETLIFY_AI_GATEWAY_KEY') || getEnv('NETLIFY_AI_GATEWAY_BASE_URL'));
+    const allowGateway = getEnv('ALLOW_NETLIFY_AI_GATEWAY', 'false') === 'true';
+    const envBaseUrl = getEnv('ANTHROPIC_BASE_URL');
+    const isGatewayKey =
+      onNetlifyGateway &&
+      Boolean(apiKey) &&
+      (apiKey === getEnv('NETLIFY_AI_GATEWAY_KEY') || (envBaseUrl && !envBaseUrl.includes('api.anthropic.com')));
+    const blocked = isGatewayKey && !allowGateway;
+    const baseUrl = onNetlifyGateway && !allowGateway ? 'https://api.anthropic.com' : envBaseUrl || 'https://api.anthropic.com';
+
     return {
-      configured: Boolean(apiKey),
-      apiKey,
-      baseUrl: getEnv('ANTHROPIC_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, ''),
+      configured: Boolean(apiKey) && !blocked,
+      apiKey: blocked ? undefined : apiKey,
+      baseUrl: baseUrl.replace(/\/+$/, ''),
       models: [...new Set([defaultModel, ...listed])],
       defaultModel,
     };

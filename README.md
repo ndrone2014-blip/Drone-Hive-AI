@@ -92,6 +92,10 @@ OPENAI_COMPAT_API_KEY=your-key
 OPENAI_COMPAT_MODEL=model-id
 ```
 
+### Netlify AI Gateway is blocked
+
+Netlify automatically adds a Claude connection to every site and bills it to your Netlify credits. Drone Hive AI **ignores it**, so it never spends your credits. To allow it on purpose, set `ALLOW_NETLIFY_AI_GATEWAY=true`.
+
 ### Protect your key (recommended once the site is public)
 
 Anyone who finds your site could use your AI credits. To stop that, set an access code:
@@ -238,7 +242,7 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `UNAUTHORIZED`, `PROV
 - The server allowlists which models can be requested, caps reply length and enforces message size limits
 - Optional access code to protect your key
 - Connection status endpoint and status pill
-- 11 automated backend tests
+- 12 automated backend tests
 
 ## 🔜 Left for future development
 
