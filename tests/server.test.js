@@ -326,3 +326,26 @@ test('provider 402 (free usage used up) gets a clear message', async () => {
   assert.equal(res.status, 429);
   assert.match(body.error.message, /used up its free usage/);
 });
+
+test('falls back to the next model when one is overloaded', async () => {
+  process.env.OPENAI_COMPAT_API_KEY = 'k';
+  process.env.OPENAI_COMPAT_BASE_URL = 'https://example.test/v1';
+  process.env.OPENAI_COMPAT_MODEL = 'busy-model';
+  process.env.OPENAI_COMPAT_MODELS = 'busy-model,free-model';
+  const tried = [];
+  globalThis.fetch = async (_u, init) => {
+    const m = JSON.parse(init.body).model;
+    tried.push(m);
+    if (m === 'busy-model') return new Response('{"error":{"code":503,"message":"high demand"}}', { status: 503 });
+    return new Response(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'), { status: 200 });
+  };
+  try {
+    const res = await handleChatRequest(chatReq(msg()));
+    const events = await readNDJSON(res);
+    assert.deepEqual(tried, ['busy-model', 'free-model']);
+    assert.equal(events[0].model, 'free-model');
+    assert.ok(events.some((e) => e.type === 'delta' && e.text === 'hi'));
+  } finally {
+    delete process.env.OPENAI_COMPAT_MODELS;
+  }
+});
