@@ -317,3 +317,12 @@ test('access code ignores accidental spaces', async () => {
   const r = await handleChatRequest(chatReq(msg(), { 'x-dronehive-access': '  hive123 ' }));
   assert.equal(r.status, 200);
 });
+
+test('provider 402 (free usage used up) gets a clear message', async () => {
+  process.env.OLLAMA_API_KEY = 'k';
+  globalThis.fetch = async () => new Response('{"error":"usage limit"}', { status: 402 });
+  const res = await handleChatRequest(chatReq(msg()));
+  const body = await res.json();
+  assert.equal(res.status, 429);
+  assert.match(body.error.message, /used up its free usage/);
+});
