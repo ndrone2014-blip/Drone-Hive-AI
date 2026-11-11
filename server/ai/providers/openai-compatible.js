@@ -45,7 +45,7 @@ export const openAICompatibleProvider = {
  * Shared helper: sends a streaming /chat/completions request and returns the
  * normalized event iterator. Used by every OpenAI-format provider (incl. Ollama).
  */
-export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal }) {
+export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal, extraHeaders }) {
   const body = {
     model,
     messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: m.content }))],
@@ -54,7 +54,7 @@ export async function openChatCompletions({ baseUrl, apiKey, providerName, model
   };
   if (typeof temperature === 'number') body.temperature = temperature;
 
-  const headers = { 'content-type': 'application/json' };
+  const headers = { ...(extraHeaders || {}), 'content-type': 'application/json' };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
   const res = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', headers, body: JSON.stringify(body), signal });
   if (!res.ok || !res.body) throw await errorFromProviderResponse(res, providerName);

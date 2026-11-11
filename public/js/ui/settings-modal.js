@@ -266,9 +266,10 @@ export class SettingsModal {
         <details class="howto">
           <summary>How to add your API key</summary>
           <ol>
-            <li><b>On Netlify:</b> Project (or Site) configuration → Environment variables → Add a variable. Name it <code>GROQ_API_KEY</code>, <code>OLLAMA_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> (scope must include Functions), paste your key, then redeploy.</li>
+            <li><b>On Netlify:</b> Project (or Site) configuration → Environment variables → Add a variable. Name it <code>GROQ_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>OLLAMA_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> (scope must include Functions), paste your key, then redeploy.</li>
             <li><b>On your PC:</b> copy <code>.env.example</code> to <code>.env</code>, set your key (e.g. <code>GROQ_API_KEY=…</code>), and restart <code>npm start</code>.</li>
             <li><b>Groq (free):</b> create a key at <code>console.groq.com/keys</code> and use the variable name <code>GROQ_API_KEY</code>.</li>
+            <li><b>OpenRouter (free models):</b> create a key at <code>openrouter.ai/keys</code> and use the variable name <code>OPENROUTER_API_KEY</code>. Only free models are used unless you set <code>OPENROUTER_ALLOW_PAID=true</code>.</li>
             <li>Other providers: set the <code>OPENAI_COMPAT_*</code> variables (see the README).</li>
           </ol>
         </details>

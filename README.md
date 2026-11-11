@@ -91,7 +91,17 @@ When `AI_PROVIDER` is `auto`, Groq is used first if its key is set. If you also 
 
 > The free plan has per-minute and per-day limits. When they're hit, the app shows a "try again shortly" message instead of charging anything.
 
-### Option D: any other OpenAI-compatible API
+### Option D: OpenRouter (free models)
+
+1. Sign in at [openrouter.ai](https://openrouter.ai) and create a key under **Keys** (it starts with `sk-or-`). No card is needed for free models.
+2. Add the environment variable `OPENROUTER_API_KEY` with that key (mark it as a secret, scope must include Functions), then redeploy.
+3. To make it the active AI, set `AI_PROVIDER=openrouter`.
+
+The default model is `openrouter/free`, which automatically routes each message to a free model that's online, with `openai/gpt-oss-120b:free` as a backup. Change them with `OPENROUTER_MODEL` / `OPENROUTER_MODELS`.
+
+> **Free-only safety lock:** the server only ever sends free models (IDs ending in `:free`, or `openrouter/free`), so it can't spend OpenRouter credits even if some are on the account. Set `OPENROUTER_ALLOW_PAID=true` only if you deliberately want paid models. Free models have per-minute and per-day request limits and change often.
+
+### Option E: any other OpenAI-compatible API
 
 Many AI services, including some with free tiers, use the "OpenAI-compatible" format. Set these variables:
 
@@ -222,6 +232,7 @@ Drone-Hive-AI/
 │           ├── anthropic.js
 │           ├── groq.js
 │           ├── ollama.js
+│           ├── openrouter.js
 │           └── openai-compatible.js
 ├── netlify/edge-functions/     ← Netlify entry points
 │   ├── chat.js                 POST /api/chat
@@ -302,7 +313,7 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `UNAUTHORIZED`, `PROV
 
 **AI backend**
 - Dedicated AI service, separate from the frontend
-- Provider registry with Groq, Anthropic Claude, Ollama (cloud or local) and any OpenAI-compatible API
+- Provider registry with Groq, OpenRouter, Anthropic Claude, Ollama (cloud or local) and any OpenAI-compatible API
 - Shared message format, streaming and non-streaming modes, and stable error codes
 - The server allowlists which models can be requested, caps reply length and enforces message size limits
 - Optional access code to protect your key (constant-time check + lockout)

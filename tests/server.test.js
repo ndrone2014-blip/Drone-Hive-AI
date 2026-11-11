@@ -11,7 +11,7 @@ import { parseSSE } from '../server/ai/sse.js';
 import { _resetSecurityState } from '../server/security.js';
 import { _setAuthKeys, _resetAuthKeys } from '../server/auth.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODELS', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED'];
+const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'OPENROUTER_MODELS', 'OPENROUTER_ALLOW_PAID', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED'];
 const realFetch = globalThis.fetch;
 let saved;
 
@@ -195,6 +195,35 @@ test('AI_PROVIDER=ollama picks Ollama even when Groq is also set', async () => {
   process.env.AI_PROVIDER = 'ollama';
   const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
   assert.equal(status.activeProvider, 'ollama');
+});
+
+test('openrouter provider uses free models only by default', async () => {
+  process.env.OPENROUTER_API_KEY = 'sk-or-test';
+  process.env.AI_PROVIDER = 'openrouter';
+  process.env.OPENROUTER_MODELS = 'anthropic/claude-opus-5-5,meta/some-model:free';
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    sent = { url, init, body: JSON.parse(init.body) };
+    return new Response('data: {"choices":[{"delta":{"content":"Routed"}}]}\n\ndata: [DONE]\n\n', { status: 200 });
+  };
+  const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(status.activeProvider, 'openrouter');
+  const or = status.providers.find((p) => p.id === 'openrouter');
+  assert.deepEqual(or.models, ['meta/some-model:free']);
+  assert.ok(!JSON.stringify(status).includes('sk-or-test'));
+  const res = await handleChatRequest(chatReq({ provider: 'openrouter', model: 'anthropic/claude-opus-5-5', messages: [{ role: 'user', content: 'hi' }] }));
+  const events = await readNDJSON(res);
+  assert.equal(sent.url, 'https://openrouter.ai/api/v1/chat/completions');
+  assert.equal(sent.init.headers.authorization, 'Bearer sk-or-test');
+  assert.equal(sent.body.model, 'meta/some-model:free');
+  assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Routed');
+});
+
+test('openrouter defaults to the free router', async () => {
+  process.env.OPENROUTER_API_KEY = 'sk-or-test';
+  const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  const or = status.providers.find((p) => p.id === 'openrouter');
+  assert.equal(or.defaultModel, 'openrouter/free');
 });
 
 test('Netlify AI Gateway (auto-injected Claude) is blocked so it never spends Netlify credits', async () => {
