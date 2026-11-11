@@ -166,15 +166,15 @@ export class ChatView {
 
   #noticeHTML(m, time, isLast, enter = '') {
     const v = m.variant || 'error';
-    const ico = v === 'disconnected' ? 'plug' : 'alert';
-    const title = v === 'disconnected' ? 'AI provider not connected' : v === 'offline' ? 'Server not reachable' : 'Something went wrong';
+    const ico = v === 'disconnected' ? 'plug' : v === 'auth' ? 'user' : 'alert';
+    const title = v === 'disconnected' ? 'AI provider not connected' : v === 'offline' ? 'Server not reachable' : v === 'auth' ? 'Sign in required' : 'Something went wrong';
     return `<article class="msg msg-notice notice-${v}${enter}" data-msg="${m.id}" role="status">
       <div class="notice-icon">${icon(ico, { size: 18 })}</div>
       <div class="notice-body">
         <div class="notice-title">${title}</div>
         <p>${escapeHtml(m.content)}</p>
         <div class="notice-actions">
-          ${v !== 'error' || /access code/i.test(m.content) ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-ai-settings">${icon('settings', { size: 14 })}<span>AI settings</span></button>` : ''}
+          ${(v !== 'error' && v !== 'auth') || /access code/i.test(m.content) ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-ai-settings">${icon('settings', { size: 14 })}<span>AI settings</span></button>` : ''}
           ${isLast ? `<button type="button" class="btn btn-sm btn-ghost" data-action="retry">${icon('refresh', { size: 14 })}<span>Try again</span></button>` : ''}
           ${time}
         </div>

@@ -40,7 +40,7 @@ export async function fetchStatus({ signal } = {}) {
  * @param {(event:object)=>void} p.onEvent  called with {type:'start'|'delta'|'done', ...}
  * @returns {Promise<{content:string, provider?:object, model?:string, usage?:object, stopReason?:string}>}
  */
-export async function sendChat({ messages, provider, model, options, stream = true, accessCode, signal, onEvent = () => {} }) {
+export async function sendChat({ messages, provider, model, options, stream = true, accessCode, authToken, signal, onEvent = () => {} }) {
   let res;
   try {
     res = await fetch(API.chat, {
@@ -49,6 +49,7 @@ export async function sendChat({ messages, provider, model, options, stream = tr
         'content-type': 'application/json',
         accept: 'application/x-ndjson, application/json',
         ...(accessCode ? { 'x-dronehive-access': accessCode } : {}),
+        ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
       },
       body: JSON.stringify({ messages, provider, model, options, stream }),
       signal,

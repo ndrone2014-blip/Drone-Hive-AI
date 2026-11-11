@@ -47,7 +47,7 @@ export class Sidebar {
     $('#sidebar-expand').addEventListener('click', () => this.toggle(true));
     $('#sidebar-backdrop').addEventListener('click', () => this.closeMobile());
     $('#settings-btn').addEventListener('click', () => this.actions.openSettings('general'));
-    $('#profile-btn').addEventListener('click', () => this.actions.openSettings('general', 'displayName'));
+    $('#profile-btn').addEventListener('click', () => (this.account ? this.actions.openSettings('account') : this.actions.openSettings('general', 'displayName')));
 
     let t;
     this.search.addEventListener('input', () => {
@@ -189,9 +189,17 @@ export class Sidebar {
     this.list.innerHTML = out;
   }
 
+  /** Signed-in account (or null). Shown in the profile area when sign-in is on. */
+  setAccount(user) {
+    this.account = user;
+    this.renderProfile();
+  }
+
   renderProfile() {
-    const name = this.settings.get('displayName').trim();
+    const acct = this.account;
+    const name = this.settings.get('displayName').trim() || acct?.name || (acct?.email ? acct.email.split('@')[0] : '');
     $('#profile-name').textContent = name || 'Guest';
+    $('#profile-sub').textContent = acct ? acct.email || 'Signed in' : 'Local profile';
     const avatar = $('#profile-avatar');
     const ini = initials(name);
     avatar.innerHTML = ini ? escapeHtml(ini) : icon('user', { size: 16 });

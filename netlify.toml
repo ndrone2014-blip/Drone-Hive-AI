@@ -20,17 +20,21 @@
 # Netlify doesn't apply these to Edge Functions.)
 #  - Content-Security-Policy: the browser only runs scripts from this site and
 #    only talks to this site, so injected code can't run or send data elsewhere.
+#    Exceptions are only Google/Firebase sign-in: the Firebase SDK (gstatic.com),
+#    Google's sign-in servers, and the Firebase sign-in popup/iframe.
 #  - Strict-Transport-Security: always HTTPS.
+#  - Cross-Origin-Opener-Policy "same-origin-allow-popups" so the
+#    "Sign in with Google" popup can report back to this page.
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://apis.google.com https://www.googleapis.com; frame-src https://*.firebaseapp.com https://*.web.app https://accounts.google.com; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
     Strict-Transport-Security = "max-age=63072000; includeSubDomains"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
-    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
     Cross-Origin-Resource-Policy = "same-origin"
 
 [[headers]]

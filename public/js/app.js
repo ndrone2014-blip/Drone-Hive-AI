@@ -2,6 +2,8 @@ import { LocalStorageAdapter } from './core/storage.js';
 import { SettingsStore } from './core/settings-store.js';
 import { ConversationStore } from './core/conversation-store.js';
 import { ConnectionService } from './services/connection.js';
+import { AuthService } from './services/auth.js';
+import { AuthGate } from './ui/auth-gate.js';
 import { sendChat, AIClientError } from './services/ai-client.js';
 import { Sidebar } from './ui/sidebar.js';
 import { ChatView } from './ui/chat-view.js';
@@ -13,6 +15,8 @@ import { toast, confirmDialog } from './ui/overlays.js';
 const NOTICE_TEXT = {
   disconnected:
     'Your message was saved, but Drone Hive AI can’t reply until an AI provider is connected. Add an API key to the server’s environment variables (see Settings → AI Configuration), then try again.',
+  auth:
+    'Your message was saved, but you need to sign in again before Drone Hive AI can reply. Sign in, then press Try again.',
   offline:
     'Your message was saved, but the Drone Hive AI server isn’t running at this address. Start it with “npm start” on your PC or open your Netlify site, then try again.',
 };
@@ -27,6 +31,8 @@ export class App {
     this.settings = new SettingsStore(storage);
     this.store = new ConversationStore(storage);
     this.connection = new ConnectionService();
+    this.auth = new AuthService();
+    this.authGate = new AuthGate({ auth: this.auth });
 
     this.sending = null; // { convId, msgId, controller }
 
@@ -67,16 +73,19 @@ export class App {
       settings: this.settings,
       store: this.store,
       connection: this.connection,
+      auth: this.auth,
       actions: {
         refreshConnection: () => this.connection.refresh(),
         exportAll: () => this.exportAll(),
         deleteConversation: (id) => this.deleteConversation(id),
         clearAll: () => this.clearAll(),
         resetSettings: () => this.resetSettings(),
+        signOut: () => this.signOut(),
       },
     });
 
     this.#bindStores();
+    this.#bindAuth();
     this.#bindGlobal();
     this.#applyAppearance();
     this.chat.render();
@@ -110,10 +119,31 @@ export class App {
       if (['provider', 'model', '*'].includes(key)) this.#renderStatus();
     });
 
-    this.connection.on('change', () => {
+    this.connection.on('change', ({ status }) => {
+      // The server tells us whether sign-in is required (and the public Firebase settings).
+      if (status?.reachable) this.auth.init(status.auth);
       this.#renderStatus();
       if (this.chat.main.classList.contains('is-welcome')) this.chat.render();
     });
+  }
+
+  #bindAuth() {
+    this.auth.on('change', ({ state }) => {
+      this.sidebar.setAccount(state === 'signed-in' ? this.auth.user : null);
+      if (state === 'signed-in') this.composer.focus();
+    });
+  }
+
+  async signOut() {
+    const ok = await confirmDialog({ title: 'Sign out?', body: 'Your conversations stay saved in this browser.', confirmText: 'Sign out' });
+    if (!ok) return;
+    this.stop();
+    try {
+      await this.auth.signOut();
+      this.settingsModal.close();
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    }
   }
 
   #bindGlobal() {
@@ -297,6 +327,7 @@ export class App {
         },
         stream: s.streamResponses,
         accessCode: (s.accessCode || '').trim() || undefined,
+        authToken: this.auth.required ? (await this.auth.getToken()) || undefined : undefined,
         signal: controller.signal,
         onEvent: (ev) => {
           if (ev.type === 'start') meta = { provider: ev.provider?.id, model: ev.model };
@@ -327,7 +358,8 @@ export class App {
         if (partial) this.store.updateMessage(convId, placeholder.id, { content: partial, status: 'interrupted', meta });
         else this.store.removeMessage(convId, placeholder.id);
         const code = err?.code || 'UNKNOWN';
-        const variant = code === 'PROVIDER_NOT_CONFIGURED' ? 'disconnected' : code === 'BACKEND_UNAVAILABLE' ? 'offline' : 'error';
+        const authCode = ['AUTH_REQUIRED', 'AUTH_EXPIRED'].includes(code);
+        const variant = code === 'PROVIDER_NOT_CONFIGURED' ? 'disconnected' : code === 'BACKEND_UNAVAILABLE' ? 'offline' : authCode ? 'auth' : 'error';
         this.store.addMessage(convId, {
           role: 'notice',
           variant,
@@ -335,6 +367,8 @@ export class App {
           meta: { code },
         });
         this.connection.markFromError(code);
+        // Server says sign-in is needed (e.g. it was just turned on): re-check status to show the sign-in screen.
+        if (authCode || code === 'EMAIL_NOT_VERIFIED') this.connection.refresh();
         if (code !== 'PROVIDER_NOT_CONFIGURED' && code !== 'BACKEND_UNAVAILABLE') console.warn('[Drone Hive AI]', code, err?.message);
       }
     } finally {

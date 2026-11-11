@@ -1,5 +1,6 @@
 import { getServerConfig } from './config.js';
 import { getStatus, openChat } from './ai/service.js';
+import { enforceAuth, publicAuthStatus } from './auth.js';
 import { AIError, ERROR_CODES, toAIError } from './ai/errors.js';
 import {
   API_SECURITY_HEADERS,
@@ -71,7 +72,7 @@ async function readBody(req) {
 export async function handleStatusRequest(req) {
   if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Use GET.' } }, 405, { allow: 'GET' });
   try {
-    return json(getStatus());
+    return json({ ...getStatus(), auth: publicAuthStatus() });
   } catch (err) {
     return errorResponse(err);
   }
@@ -81,15 +82,22 @@ export async function handleStatusRequest(req) {
 export async function handleChatRequest(req, info = {}) {
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Use POST.' } }, 405, { allow: 'POST' });
 
-  const key = clientKey(req, info);
+  const ipKey = `ip:${clientKey(req, info)}`;
+  // Who the limits apply to: the signed-in account when sign-in is on,
+  // otherwise the IP address. With accounts, the IP also gets a (3x larger)
+  // limit so one person can't multiply their allowance with extra accounts.
+  let keys = [{ key: ipKey, scale: 1 }];
   let body;
   let chat;
   try {
     enforceSameOrigin(req);
-    await enforceAccessCode(req, key, getServerConfig().accessCode);
-    enforceRateLimits(key);
+    const user = await enforceAuth(req);
+    if (user) keys = [{ key: `user:${user.uid}`, scale: 1 }, { key: ipKey, scale: 3 }];
+    await enforceAccessCode(req, ipKey, getServerConfig().accessCode);
+    for (const k of keys) enforceRateLimits(k.key, Date.now(), k.scale);
     body = await readBody(req);
-    chat = await openChat(body, { signal: req.signal, budget: remainingDailyTokens(key) });
+    const budget = Math.min(...keys.map((k) => remainingDailyTokens(k.key, Date.now(), k.scale)));
+    chat = await openChat(body, { signal: req.signal, budget });
   } catch (err) {
     return errorResponse(err);
   }
@@ -103,7 +111,7 @@ export async function handleChatRequest(req, info = {}) {
     counted = true;
     const input = Number(usage?.inputTokens) || chat.inputTokensEstimate;
     const output = Number(usage?.outputTokens) || Math.ceil(outputChars / 4);
-    recordTokenUsage(key, input + output);
+    for (const k of keys) recordTokenUsage(k.key, input + output);
   };
   const track = (ev) => {
     if (ev?.type === 'delta') outputChars += String(ev.text || '').length;

@@ -7,6 +7,7 @@ Composer ──► App.send()  (public/js/app.js)
                │  saves the user message (ConversationStore → localStorage)
                ▼
            ai-client.sendChat()  ──POST /api/chat──►  handlers.handleChatRequest()
+                                                         │ sign-in check (server/auth.js)
                                                          │ access code check
                                                          ▼
                                                    service.openChat()
@@ -40,7 +41,7 @@ Both use web-standard `Request`/`Response`. Don't import Node-only modules (`fs`
 | **Web search / tools** | Add tool definitions in the provider's `open()` and new event types (`tool_call`, `tool_result`) to the NDJSON stream. `ai-client.js` already passes every event to `onEvent`. |
 | **Conversation folders** | `conversation.folderId` already exists. Add folder CRUD to `ConversationStore` and a section in `sidebar.js`. |
 | **Voice input / responses** | Add a mic button to the composer (Web Speech API is free in Chromium browsers) behind `FEATURES.voiceInput`. Speech output can use `speechSynthesis`. |
-| **User accounts + sync** | Write a new storage adapter with the same methods as `LocalStorageAdapter` (`load`, `save`, `remove`, `usage`) that calls a backend, and pass it to the stores in `app.js`. |
+| **Cross-device sync** | Accounts already exist (`AuthService` in `public/js/services/auth.js`; the server knows the user's `uid` in `handlers.js`). Write a new storage adapter with the same methods as `LocalStorageAdapter` (`load`, `save`, `remove`, `usage`) that calls a backend, and pass it to the stores in `app.js`. |
 
 ## Data shapes
 

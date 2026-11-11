@@ -10,6 +10,7 @@ import { AIError, ERROR_CODES } from './ai/errors.js';
  *      — enforced by Netlify before our code even runs, shared across the whole CDN.
  *   2. Same-origin check — other websites can't use your AI from their pages.
  *   3. Access code — constant-time comparison + lockout after repeated wrong guesses.
+ *   3b. Sign-in (server/auth.js) — only signed-in users with a verified email.
  *   4. Per-visitor limits (requests/minute, requests/day, tokens/day) — see note below.
  *   5. Hard per-request caps on input and output tokens (service.js / config.js).
  *
@@ -71,8 +72,9 @@ function tooMany(message, retryAfterSec) {
 }
 
 /** Throws if this visitor is over any limit. Records the request if allowed. */
-export function enforceRateLimits(key, now = Date.now()) {
-  const cfg = getSecurityConfig();
+export function enforceRateLimits(key, now = Date.now(), scale = 1) {
+  const base = getSecurityConfig();
+  const cfg = { perMinute: base.perMinute * scale, perDay: base.perDay * scale, tokensPerDay: base.tokensPerDay * scale };
   const v = visitor(key, now);
   if (v.minute.length >= cfg.perMinute) {
     throw tooMany(`Slow down — you can send ${cfg.perMinute} messages per minute. Try again in a moment.`, (MINUTE - (now - v.minute[0])) / 1000);
@@ -88,9 +90,9 @@ export function enforceRateLimits(key, now = Date.now()) {
 }
 
 /** Remaining daily token allowance for this visitor (used to shrink max output). */
-export function remainingDailyTokens(key, now = Date.now()) {
+export function remainingDailyTokens(key, now = Date.now(), scale = 1) {
   const v = visitor(key, now);
-  return Math.max(0, getSecurityConfig().tokensPerDay - v.dayTokens);
+  return Math.max(0, getSecurityConfig().tokensPerDay * scale - v.dayTokens);
 }
 
 /** Adds tokens a request used to the visitor's daily total. */

@@ -39,7 +39,7 @@ export const FEATURES = {
   voiceResponses: false,
   folders: false,
   personalities: false,
-  accounts: false,
+  accounts: true, // sign in with Google or email (Firebase, turned on from the server)
   cloudSync: false,
 };
 

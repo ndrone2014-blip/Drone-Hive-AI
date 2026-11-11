@@ -9,8 +9,9 @@ import { handleChatRequest, handleStatusRequest } from '../server/handlers.js';
 import { normalizeMessages } from '../server/ai/messages.js';
 import { parseSSE } from '../server/ai/sse.js';
 import { _resetSecurityState } from '../server/security.js';
+import { _setAuthKeys, _resetAuthKeys } from '../server/auth.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY'];
+const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED'];
 const realFetch = globalThis.fetch;
 let saved;
 
@@ -18,6 +19,7 @@ beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   ENV_KEYS.forEach((k) => delete process.env[k]);
   _resetSecurityState();
+  _resetAuthKeys();
 });
 afterEach(() => {
   ENV_KEYS.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])));
@@ -347,5 +349,100 @@ test('falls back to the next model when one is overloaded', async () => {
     assert.ok(events.some((e) => e.type === 'delta' && e.text === 'hi'));
   } finally {
     delete process.env.OPENAI_COMPAT_MODELS;
+  }
+});
+
+// ── Sign-in (Firebase ID tokens) ─────────────────────────────────────────────
+const PROJECT = 'drone-hive-test';
+const b64url = (bytes) => Buffer.from(bytes).toString('base64url');
+let signer;
+async function setupKeys() {
+  signer = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  _setAuthKeys(new Map([['kid1', signer.publicKey]]));
+}
+async function makeToken(overrides = {}, { kid = 'kid1', key } = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: 'RS256', kid, typ: 'JWT' }));
+  const payload = b64url(JSON.stringify({
+    iss: `https://securetoken.google.com/${PROJECT}`, aud: PROJECT, sub: 'user-123', iat: now - 10, auth_time: now - 10, exp: now + 3600,
+    email: 'a@example.com', email_verified: true, firebase: { sign_in_provider: 'password' }, ...overrides,
+  }));
+  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key || signer.privateKey, new TextEncoder().encode(`${header}.${payload}`));
+  return `${header}.${payload}.${b64url(new Uint8Array(sig))}`;
+}
+function enableAuth() {
+  process.env.FIREBASE_API_KEY = 'public-web-key';
+  process.env.FIREBASE_PROJECT_ID = PROJECT;
+  process.env.ANTHROPIC_API_KEY = 'k';
+  globalThis.fetch = async () => sseBody([
+    { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+  ]);
+}
+const authed = (token) => chatReq({ messages: [{ role: 'user', content: 'hi' }], stream: false }, token ? { authorization: `Bearer ${token}` } : {});
+
+test('status shares only public sign-in settings', async () => {
+  let data = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(data.auth.required, false);
+  enableAuth();
+  data = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
+  assert.equal(data.auth.required, true);
+  assert.deepEqual(data.auth.firebase, { apiKey: 'public-web-key', authDomain: `${PROJECT}.firebaseapp.com`, projectId: PROJECT });
+});
+
+test('with sign-in on, chat needs a valid, verified Firebase token', async () => {
+  await setupKeys();
+  enableAuth();
+  const none = await handleChatRequest(authed());
+  assert.equal(none.status, 401);
+  assert.equal((await none.json()).error.code, 'AUTH_REQUIRED');
+
+  const good = await handleChatRequest(authed(await makeToken()));
+  assert.equal(good.status, 200);
+  assert.equal((await good.json()).message.content, 'ok');
+
+  const cases = {
+    expired: [{ exp: Math.floor(Date.now() / 1000) - 5 }, 'AUTH_EXPIRED'],
+    otherProject: [{ aud: 'someone-else' }, 'AUTH_REQUIRED'],
+    badIssuer: [{ iss: 'https://evil.example' }, 'AUTH_REQUIRED'],
+    unverified: [{ email_verified: false }, 'EMAIL_NOT_VERIFIED'],
+    anonymous: [{ firebase: { sign_in_provider: 'anonymous' } }, 'AUTH_REQUIRED'],
+  };
+  for (const [name, [claims, code]] of Object.entries(cases)) {
+    const res = await handleChatRequest(authed(await makeToken(claims)));
+    assert.equal(res.status, 401, name);
+    assert.equal((await res.json()).error.code, code, name);
+  }
+
+  // Signed with a different (attacker) key
+  const evil = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+  assert.equal((await handleChatRequest(authed(await makeToken({}, { key: evil.privateKey })))).status, 401);
+  // Tampered payload
+  const [h, , sig] = (await makeToken()).split('.');
+  const forged = `${h}.${b64url(JSON.stringify({ sub: 'admin', aud: PROJECT }))}.${sig}`;
+  assert.equal((await handleChatRequest(authed(forged))).status, 401);
+  // alg "none"
+  assert.equal((await handleChatRequest(authed(`${b64url('{"alg":"none","kid":"kid1"}')}.${b64url('{}')}.`))).status, 401);
+  // Unknown key id doesn't trigger a key download while keys are fresh
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; return new Response('{}'); };
+  assert.equal((await handleChatRequest(authed(await makeToken({}, { kid: 'nope' })))).status, 401);
+  assert.equal(fetched, false);
+});
+
+test('rate limits follow the account when signed in', async () => {
+  await setupKeys();
+  enableAuth();
+  process.env.AI_RATE_LIMIT_PER_MINUTE = '2';
+  try {
+    const t1 = await makeToken({ sub: 'u1' });
+    const t2 = await makeToken({ sub: 'u2' });
+    assert.equal((await handleChatRequest(authed(t1))).status, 200);
+    assert.equal((await handleChatRequest(authed(t1))).status, 200);
+    assert.equal((await handleChatRequest(authed(t1))).status, 429);
+    // A different account on the same connection still gets its own allowance
+    assert.equal((await handleChatRequest(authed(t2))).status, 200);
+  } finally {
+    delete process.env.AI_RATE_LIMIT_PER_MINUTE;
   }
 });

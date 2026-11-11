@@ -4,6 +4,7 @@ import { APP } from '../config.js';
 
 const SECTIONS = [
   { id: 'general', label: 'General', icon: 'sliders' },
+  { id: 'account', label: 'Account', icon: 'user', when: (m) => m.auth?.required },
   { id: 'ai', label: 'AI Configuration', icon: 'cpu' },
   { id: 'data', label: 'Data & Privacy', icon: 'shield' },
   { id: 'about', label: 'About', icon: 'info' },
@@ -13,7 +14,8 @@ const SECTIONS = [
  * Settings dashboard (modal). Every control writes straight to SettingsStore.
  */
 export class SettingsModal {
-  constructor({ settings, store, connection, actions }) {
+  constructor({ settings, store, connection, auth, actions }) {
+    this.auth = auth;
     this.settings = settings;
     this.store = store;
     this.connection = connection;
@@ -23,6 +25,12 @@ export class SettingsModal {
 
     connection.on('change', () => {
       if (this.el && this.section === 'ai') this.#renderSection();
+    });
+    auth?.on('change', () => {
+      if (this.el) {
+        this.#renderNav();
+        if (this.section === 'account') this.#renderSection();
+      }
     });
     store.on('change', () => {
       if (this.el && this.section === 'data') this.#renderSection();
@@ -34,7 +42,7 @@ export class SettingsModal {
   }
 
   open(section = 'general', focusKey = null) {
-    this.section = SECTIONS.some((s) => s.id === section) ? section : 'general';
+    this.section = this.#sections().some((s) => s.id === section) ? section : 'general';
     if (!this.el) this.#mount();
     this.#renderNav();
     this.#renderSection();
@@ -101,8 +109,12 @@ export class SettingsModal {
     content.addEventListener('input', (e) => this.#onInput(e));
   }
 
+  #sections() {
+    return SECTIONS.filter((s) => !s.when || s.when(this));
+  }
+
   #renderNav() {
-    this.el.querySelector('#settings-tabs').innerHTML = SECTIONS.map(
+    this.el.querySelector('#settings-tabs').innerHTML = this.#sections().map(
       (s) => `<button type="button" role="tab" class="settings-tab${s.id === this.section ? ' active' : ''}" aria-selected="${s.id === this.section}" data-section="${s.id}">${icon(s.icon, { size: 17 })}<span>${s.label}</span></button>`,
     ).join('');
   }
@@ -112,7 +124,7 @@ export class SettingsModal {
     const keepScroll = content.dataset.section === this.section ? content.scrollTop : 0;
     const active = document.activeElement;
     const activeKey = content.contains(active) ? active.dataset.setting : null;
-    const renderers = { general: () => this.#general(), ai: () => this.#ai(), data: () => this.#data(), about: () => this.#about() };
+    const renderers = { general: () => this.#general(), account: () => this.#account(), ai: () => this.#ai(), data: () => this.#data(), about: () => this.#about() };
     content.innerHTML = renderers[this.section]();
     content.dataset.section = this.section;
     content.scrollTop = keepScroll;
@@ -164,6 +176,26 @@ export class SettingsModal {
         <div class="group-label">Chat</div>
         ${toggleRow('enterToSend', s.enterToSend, 'Press Enter to send', 'When off, use Ctrl+Enter to send and Enter for a new line.')}
         ${toggleRow('autoScroll', s.autoScroll, 'Auto-scroll to new messages')}
+      </div>`;
+  }
+
+  #account() {
+    const u = this.auth?.user;
+    const via = u?.provider === 'google.com' ? 'Google' : 'Email and password';
+    return `
+      <h3 class="section-title">Account</h3>
+      <p class="section-sub">You’re signed in. Accounts keep bots from using Drone Hive AI.</p>
+      <div class="group">
+        <div class="group-label">Signed in as</div>
+        <div class="row"><span class="row-text"><span class="row-title">Email</span></span><span class="chip">${escapeHtml(u?.email || '—')}</span></div>
+        <div class="row"><span class="row-text"><span class="row-title">Sign-in method</span></span><span class="chip">${via}</span></div>
+      </div>
+      <div class="group">
+        <div class="group-label">Session</div>
+        <div class="row">
+          <span class="row-text"><span class="row-title">Sign out</span><span class="row-sub">Your conversations stay saved in this browser.</span></span>
+          <button type="button" class="btn btn-sm btn-secondary" data-action="sign-out">Sign out</button>
+        </div>
       </div>`;
   }
 
@@ -363,6 +395,9 @@ export class SettingsModal {
     switch (btn.dataset.action) {
       case 'refresh':
         this.actions.refreshConnection();
+        break;
+      case 'sign-out':
+        await this.actions.signOut();
         break;
       case 'export':
         this.actions.exportAll();

@@ -96,6 +96,37 @@ OPENAI_COMPAT_MODEL=model-id
 
 Netlify automatically adds a Claude connection to every site and bills it to your Netlify credits. Drone Hive AI **ignores it**, so it never spends your credits. To allow it on purpose, set `ALLOW_NETLIFY_AI_GATEWAY=true`.
 
+## 👤 Accounts: sign in with Google or email
+
+Turn this on so only real, signed-in people can use the AI. Bots can't get past it without signing in **and** verifying an email address. It uses **Firebase Authentication on the free Spark plan** — no card needed, and sign-ins with Google or email are free.
+
+Until you finish these steps, the site works exactly like before.
+
+1. Go to [console.firebase.google.com](https://console.firebase.google.com) → **Create a project** (name it `drone-hive-ai`). You can turn Google Analytics off. Don't upgrade to the Blaze plan.
+2. **Build → Authentication → Get started → Sign-in method**, then enable:
+   - **Email/Password** (leave "Email link" off)
+   - **Google** (pick your support email, then Save)
+3. **Authentication → Settings → Authorized domains → Add domain**: add your Netlify address (for example `drone-hive-ai.netlify.app`) and any custom domain.
+4. **Project settings (gear icon) → General → Your apps → Web (`</>`)**. Register an app (no Hosting needed). Copy `apiKey` and `projectId` from the code it shows.
+5. In **Netlify → Environment variables**, add:
+   ```
+   FIREBASE_API_KEY=the apiKey value
+   FIREBASE_PROJECT_ID=the projectId value
+   ```
+   These two are **public** values (Firebase puts them in every website), so they don't need to be marked secret.
+6. **Deploys → Trigger deploy.** The site now shows a sign-in screen.
+
+What each part blocks:
+
+| Protection | What it stops |
+|---|---|
+| Server checks Google's signature on every chat request (`server/auth.js`) | Fake or edited sign-in tokens, scripts calling `/api/chat` directly |
+| Email must be verified | Bots making throwaway accounts with fake emails |
+| Limits per account **and** per IP (IP gets 3× the account limit) | One person farming extra accounts to multiply their allowance |
+| Firebase's own limits (100 new accounts/hour per IP, lockout on password guessing) | Mass sign-ups and password guessing |
+
+To turn sign-in off again without deleting anything, set `AUTH_REQUIRED=false` and redeploy.
+
 ## 🔒 Security & token limits
 
 Built in, no setup needed:
@@ -266,7 +297,8 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `UNAUTHORIZED`, `PROV
 - Optional access code to protect your key (constant-time check + lockout)
 - Rate limits, daily token budgets and per-request token caps
 - Connection status endpoint and status pill
-- 12 automated backend tests
+- Sign in with Google or email + password (Firebase, free), checked on the server for every chat
+- 25 automated backend tests
 
 ## 🔜 Left for future development
 
@@ -280,7 +312,7 @@ The architecture is ready for these (see [docs/ARCHITECTURE.md](docs/ARCHITECTUR
 - Voice input and voice responses
 - Custom AI personalities
 - Multiple models side by side
-- User accounts and cross-device conversation sync
+- Cross-device conversation sync (accounts are done; chats are still saved per browser)
 - Importing exported conversations
 
 ---
