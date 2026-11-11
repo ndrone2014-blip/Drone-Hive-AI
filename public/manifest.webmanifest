@@ -1,0 +1,13 @@
+{
+  "name": "Drone Hive AI",
+  "short_name": "Drone Hive AI",
+  "description": "An AI assistant by Drone Hive Studios",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F6F2",
+  "theme_color": "#0F0E0C",
+  "icons": [
+    { "src": "/assets/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/assets/brand/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

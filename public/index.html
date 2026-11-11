@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Drone Hive AI</title>
+  <meta name="description" content="Drone Hive AI — an AI assistant for code, ideas and writing by Drone Hive Studios.">
+  <meta name="theme-color" content="#F7F6F2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0F0E0C" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Drone Hive AI">
+  <meta property="og:description" content="An AI assistant by Drone Hive Studios.">
+  <meta property="og:image" content="/assets/brand/og-banner.png">
+  <link rel="icon" type="image/png" href="/assets/brand/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <!-- Apply saved theme before paint to avoid a flash -->
+  <script>
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('dhai.settings.v1') || '{}');
+        var t = s.theme || 'system';
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+        if (s.fontSize) document.documentElement.dataset.fontSize = s.fontSize;
+        if (s.sidebarCollapsed) document.documentElement.classList.add('sidebar-collapsed');
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/sidebar.css">
+  <link rel="stylesheet" href="/css/chat.css">
+  <link rel="stylesheet" href="/css/settings.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- ── Sidebar ─────────────────────────────────────── -->
+    <aside class="sidebar" id="sidebar" aria-label="Conversations">
+      <div class="sidebar-head">
+        <a class="brand" href="/" id="brand-home" aria-label="Drone Hive AI home">
+          <img class="brand-emblem logo-ink" src="/assets/brand/emblem.png" alt="" width="30" height="30">
+          <span class="brand-text">
+            <span class="brand-name">Drone Hive <b>AI</b></span>
+            <span class="brand-sub">Drone Hive Studios</span>
+          </span>
+        </a>
+        <button class="icon-btn" id="sidebar-collapse" type="button" title="Collapse sidebar" aria-label="Collapse sidebar"></button>
+      </div>
+
+      <button class="btn btn-primary btn-new-chat" id="new-chat" type="button"></button>
+
+      <div class="search">
+        <span class="search-icon" aria-hidden="true"></span>
+        <input id="search-input" class="search-input" type="search" placeholder="Search conversations" aria-label="Search conversations" autocomplete="off">
+        <kbd class="search-kbd" aria-hidden="true">Ctrl K</kbd>
+      </div>
+
+      <nav class="conv-list" id="conv-list" aria-label="Conversation history"></nav>
+
+      <div class="sidebar-foot">
+        <button class="profile" id="profile-btn" type="button" aria-label="Open profile settings">
+          <span class="avatar" id="profile-avatar"></span>
+          <span class="profile-text">
+            <span class="profile-name" id="profile-name">Guest</span>
+            <span class="profile-sub">Local profile</span>
+          </span>
+        </button>
+        <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-label="Open settings"></button>
+      </div>
+    </aside>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <!-- ── Main ────────────────────────────────────────── -->
+    <main class="main is-welcome" id="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn" id="sidebar-expand" type="button" title="Open sidebar" aria-label="Open sidebar"></button>
+          <button class="icon-btn" id="topbar-new-chat" type="button" title="New chat" aria-label="New chat"></button>
+          <h1 class="topbar-title" id="topbar-title">New conversation</h1>
+        </div>
+        <button class="status-pill" id="status-pill" type="button" data-state="checking" title="AI connection status">
+          <span class="status-dot"></span><span class="status-label">Checking…</span>
+        </button>
+      </header>
+
+      <section class="chat" id="chat-scroll" aria-live="polite">
+        <div class="chat-inner" id="chat-content"></div>
+      </section>
+      <button class="scroll-bottom" id="scroll-bottom" type="button" aria-label="Scroll to latest message" hidden></button>
+
+      <footer class="composer-wrap" id="composer-wrap">
+        <form class="composer" id="composer" autocomplete="off">
+          <textarea id="composer-input" class="composer-input" rows="1" placeholder="Message Drone Hive AI…" aria-label="Message Drone Hive AI"></textarea>
+          <div class="composer-bar">
+            <div class="composer-tools">
+              <button class="icon-btn" id="attach-btn" type="button" title="Attach files (coming soon)" aria-label="Attach files (coming soon)"></button>
+              <button class="icon-btn" id="clear-btn" type="button" title="Clear message" aria-label="Clear message" hidden></button>
+            </div>
+            <div class="composer-right">
+              <span class="char-count" id="char-count" hidden></span>
+              <button class="send-btn" id="send-btn" type="submit" aria-label="Send message" disabled></button>
+            </div>
+          </div>
+        </form>
+        <p class="composer-hint" id="composer-hint"></p>
+      </footer>
+    </main>
+  </div>
+
+  <noscript><p style="padding:2rem;font-family:sans-serif">Drone Hive AI needs JavaScript enabled.</p></noscript>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

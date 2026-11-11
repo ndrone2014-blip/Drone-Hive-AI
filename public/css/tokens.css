@@ -1,0 +1,102 @@
+/* ─────────────────────────────────────────────────────────────
+   Drone Hive AI — design tokens
+   Palette taken from the Drone Hive Studios brand:
+   ink black, warm off-white (#F7F6F2) and the honey-gold divider (#D69B27).
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Roboto, Arial, sans-serif;
+  --font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --gold: #d69b27;
+  --gold-strong: #b98119;
+  --gold-soft: rgba(214, 155, 39, 0.12);
+  --gold-ring: rgba(214, 155, 39, 0.45);
+
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --sidebar-w: 276px;
+  --content-w: 780px;
+  --topbar-h: 56px;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur: 180ms;
+
+  font-size: 15px;
+}
+
+:root[data-font-size='small'] { font-size: 14px; }
+:root[data-font-size='large'] { font-size: 16.5px; }
+
+/* ── Light ───────────────────────────────────────────────── */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f7f6f2;
+  --bg-elev: #ffffff;
+  --sidebar-bg: #efede7;
+  --surface: #ffffff;
+  --surface-2: #f0eee8;
+  --surface-3: #e7e4dc;
+  --hover: rgba(22, 21, 19, 0.055);
+  --border: #e2ded5;
+  --border-strong: #d2cdc1;
+  --text: #161513;
+  --text-2: #57534c;
+  --text-3: #8b867c;
+  --ink: #161513;
+  --ink-fg: #f7f6f2;
+  --user-bg: #161513;
+  --user-fg: #f7f6f2;
+  --accent-text: #9a6a10;
+  --ok: #2f8f5b;
+  --warn: #b98119;
+  --danger: #c2412d;
+  --danger-soft: rgba(194, 65, 45, 0.09);
+  --code-bg: #171614;
+  --code-head: #211f1c;
+  --code-fg: #eceae4;
+  --shadow-sm: 0 1px 2px rgba(22, 21, 19, 0.06);
+  --shadow: 0 6px 24px -8px rgba(22, 21, 19, 0.18), 0 1px 3px rgba(22, 21, 19, 0.06);
+  --shadow-lg: 0 24px 64px -16px rgba(22, 21, 19, 0.3);
+  --hex-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 56 98'%3E%3Cpath d='M28 66 0 50V17L28 1l28 16v33L28 66Zm0 0v32M28 1V-31' fill='none' stroke='%23161513' stroke-opacity='0.06' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+/* ── Dark ────────────────────────────────────────────────── */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f0e0c;
+  --bg-elev: #181714;
+  --sidebar-bg: #131210;
+  --surface: #1a1916;
+  --surface-2: #211f1b;
+  --surface-3: #2a2823;
+  --hover: rgba(247, 246, 242, 0.06);
+  --border: #2a2823;
+  --border-strong: #3a372f;
+  --text: #f3f1ec;
+  --text-2: #b5b0a6;
+  --text-3: #7f7a70;
+  --ink: #f3f1ec;
+  --ink-fg: #121110;
+  --user-bg: #2b2823;
+  --user-fg: #f3f1ec;
+  --accent-text: #e6b04a;
+  --gold: #e0a93a;
+  --gold-strong: #f0bb4f;
+  --gold-soft: rgba(224, 169, 58, 0.13);
+  --ok: #4cbb7f;
+  --warn: #e0a93a;
+  --danger: #ef6a54;
+  --danger-soft: rgba(239, 106, 84, 0.12);
+  --code-bg: #0b0a09;
+  --code-head: #171614;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 8px 28px -10px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 28px 72px -18px rgba(0, 0, 0, 0.75);
+  --hex-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 56 98'%3E%3Cpath d='M28 66 0 50V17L28 1l28 16v33L28 66Zm0 0v32M28 1V-31' fill='none' stroke='%23f7f6f2' stroke-opacity='0.045' stroke-width='1'/%3E%3C/svg%3E");
+}

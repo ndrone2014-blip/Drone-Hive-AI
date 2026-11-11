@@ -1,0 +1,31 @@
+# Drone Hive AI — Netlify configuration
+# No build step and no paid add-ons: Netlify serves /public as-is and runs
+# the /api endpoints as Edge Functions (included on the free plan).
+
+[build]
+  publish = "public"
+  edge_functions = "netlify/edge-functions"
+
+[dev]
+  publish = "public"
+  port = 8888
+
+# Security headers for the app pages
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), geolocation=()"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# Single-page app: unknown paths load the app
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

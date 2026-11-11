@@ -1,0 +1,86 @@
+/* ── App shell ───────────────────────────────────────────── */
+.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.sidebar {
+  flex: 0 0 var(--sidebar-w); width: var(--sidebar-w);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 10px 10px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  transition: margin-left 240ms var(--ease);
+  z-index: 40;
+}
+.sidebar-collapsed .sidebar { margin-left: calc(-1 * var(--sidebar-w)); }
+
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 4px 6px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); min-width: 0; border-radius: var(--radius-sm); }
+.brand-emblem { width: 30px; height: 30px; object-fit: contain; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.brand-name { font-family: var(--font-display); font-weight: 800; font-size: 1.02rem; letter-spacing: -0.01em; white-space: nowrap; }
+.brand-name b { color: var(--gold); font-weight: 800; }
+.brand-sub { font-size: 0.64rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-3); font-weight: 600; white-space: nowrap; }
+
+.btn-new-chat { width: 100%; height: 40px; justify-content: flex-start; padding: 0 14px; }
+
+.search { position: relative; }
+.search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-3); pointer-events: none; }
+.search-input {
+  width: 100%; height: 36px; padding: 0 58px 0 34px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.9rem; transition: border-color var(--dur), box-shadow var(--dur);
+}
+.search-input::placeholder { color: var(--text-3); }
+.search-input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.search-input::-webkit-search-cancel-button { display: none; }
+.search-kbd { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.search-input:focus ~ .search-kbd, .search-input:not(:placeholder-shown) ~ .search-kbd { display: none; }
+
+/* Conversation list */
+.conv-list { flex: 1; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.conv-group { margin-bottom: 10px; }
+.conv-group-label { position: sticky; top: 0; z-index: 1; padding: 8px 10px 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); background: var(--sidebar-bg); }
+.conv-item {
+  position: relative; display: flex; align-items: center; gap: 4px;
+  min-height: 36px; padding: 6px 4px 6px 12px; margin: 1px 0;
+  border-radius: var(--radius-sm); color: var(--text-2); cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.conv-item:hover { background: var(--hover); color: var(--text); }
+.conv-item.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.conv-item.active::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 3px; background: var(--gold); }
+.conv-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.conv-title { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-snippet { font-size: 0.76rem; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-more { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--text-3); opacity: 0; transition: opacity var(--dur), background var(--dur); }
+.conv-item:hover .conv-more, .conv-item.active .conv-more, .conv-more:focus-visible, .conv-more[aria-expanded='true'] { opacity: 1; }
+.conv-more:hover, .conv-more[aria-expanded='true'] { background: var(--hover); color: var(--text); }
+.conv-item.renaming { padding: 3px 4px; }
+.conv-rename { width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--gold); border-radius: 7px; background: var(--surface); box-shadow: 0 0 0 3px var(--gold-soft); font-size: 0.9rem; }
+.conv-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 16px; text-align: center; color: var(--text-3); font-size: 0.86rem; }
+.conv-empty p { margin: 0; }
+
+/* Footer */
+.sidebar-foot { display: flex; align-items: center; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.profile { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); text-align: left; transition: background var(--dur); }
+.profile:hover { background: var(--hover); }
+.avatar { flex: 0 0 32px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--ink-fg); font-size: 0.78rem; font-weight: 700; box-shadow: 0 0 0 2px var(--sidebar-bg), 0 0 0 3.5px var(--gold); }
+.profile-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.profile-name { font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-sub { font-size: 0.74rem; color: var(--text-3); }
+
+.sidebar-backdrop { display: none; }
+
+/* Topbar buttons that only show when the sidebar is hidden */
+#sidebar-expand, #topbar-new-chat { display: none; }
+.sidebar-collapsed #sidebar-expand, .sidebar-collapsed #topbar-new-chat { display: inline-grid; }
+
+/* ── Mobile / narrow: sidebar becomes a drawer ───────────── */
+@media (max-width: 860px) {
+  .sidebar { position: fixed; inset: 0 auto 0 0; margin-left: 0 !important; transform: translateX(-102%); transition: transform 240ms var(--ease); }
+  .sidebar-open .sidebar { transform: none; box-shadow: var(--shadow-lg); }
+  .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(10, 9, 8, 0.4); opacity: 0; pointer-events: none; transition: opacity 240ms var(--ease); }
+  .sidebar-open .sidebar-backdrop { opacity: 1; pointer-events: auto; }
+  #sidebar-expand, #topbar-new-chat { display: inline-grid; }
+  #sidebar-collapse .icon { transform: scaleX(-1); }
+}
