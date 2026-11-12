@@ -51,12 +51,14 @@ Automated: `npm test` → **53 passing** (no network or keys needed). Browser ch
 | Mobile: drawer, swipe-close, bottom-sheet menus, safe areas, 16px fields, 44px targets, toasts don't cover the composer | ✅ browser |
 | Chat history: saved, reloaded, images restored from IndexedDB, deleted with the conversation | ✅ browser |
 | Unauthorized access (no token, expired, wrong project, forged, `alg:none`, unverified email) refused | ✅ automated |
-| Real providers on the live site | ⚠️ checked after deploy — see the deploy notes in the commit / chat |
+| Live site (Netlify edge): new code running, all 4 providers detected, Gemini found from existing settings, sign-in screen shown to visitors, manifest served, Netlify secret scan clean | ✅ checked after deploy (Nov 12, 2026) |
+| A real signed-in chat (text + image) on the live site | ⏳ needs the owner to sign in and try — not possible without an account |
 
 Things that could not be tested here: a real phone's on-screen keyboard (logic uses the standard `visualViewport` API and was reviewed, not run on a device), real Gemini/Groq/OpenRouter/Ollama calls (no keys in the test environment), and Netlify's edge runtime itself before deploy.
 
 ## Remaining risks & limits (please read)
 
+0. **Netlify "Team Login" visitor protection was turned off** on Nov 12, 2026 at the owner's request so the site is public. The app's own sign-in, usage limits and global cap now guard it.
 1. **Until Firestore is set up, daily/hourly/global limits are per edge server.** A determined person hitting different Netlify locations could exceed them. Netlify's own 10/min per IP limit still applies everywhere. → Follow "Turn on shared usage limits" in the README (free, ~5 minutes).
 2. **People can still make several real accounts.** Each needs a real, verified email; the per-IP limit (3×) and the global daily cap bound the total damage.
 3. **Shared networks** (schools, offices) share one IP, so they share the per-IP limits and Netlify's 10/min limit.
