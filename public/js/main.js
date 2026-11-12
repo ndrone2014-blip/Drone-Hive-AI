@@ -1,10 +1,20 @@
 import { App } from './app.js';
 
+/** Fades out the loading screen once the app is on screen. */
+function hideBoot() {
+  const boot = document.getElementById('boot');
+  if (!boot) return;
+  requestAnimationFrame(() => boot.classList.add('done'));
+  setTimeout(() => boot.remove(), 400);
+}
+
 /** Entry point. */
 function start() {
   try {
     window.droneHiveAI = new App();
+    hideBoot();
   } catch (err) {
+    hideBoot();
     console.error('[Drone Hive AI] Failed to start', err);
     const el = document.getElementById('chat-content');
     if (el) {

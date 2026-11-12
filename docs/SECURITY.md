@@ -1,4 +1,4 @@
-# Drone Hive AI — security review & test checklist (v0.2.0, November 2026)
+# Drone Hive AI — security review & test checklist (v0.3.0, November 2026)
 
 This is an honest record of what protects the site, what was tested, and what risks remain. **No website is completely secure**; the goal is to make abuse hard, limited and visible.
 
@@ -17,6 +17,9 @@ This is an honest record of what protects the site, what was tested, and what ri
 | SQL injection | There is no SQL database. Firestore is only written by the server, at document IDs made from SHA-256 hashes; user text never becomes part of a query. | `server/usage/firestore.js` |
 | Your computer | The site runs entirely on Netlify. There is no file access, shell or code execution for visitors. A local/private Ollama address is ignored on the public site; the local dev server only listens on 127.0.0.1. | `providers/ollama.js`, `scripts/dev-server.mjs` |
 | Server info | API responses carry `no-store`, `nosniff`, `DENY` framing, CSP `default-src 'none'`, `noindex`. Errors are generic and never include stack traces or provider output. `/.env*` paths return 404. | `server/security.js`, `netlify.toml` |
+| Memory privacy | Account memories are read and written only for the account whose sign-in token the server verified, at `memories/{sha256(uid)}`; anything a browser sends is ignored in account mode, so one account can't read, inject or delete another's notes. Browser memories are kept in a separate localStorage list per account. Saves use an `updateTime` precondition so two tabs can't overwrite each other. | `server/memory/store.js`, `server/handlers.js`, `public/js/core/memory-store.js` |
+| Secrets in memory | Passwords, API keys, tokens, private keys, card numbers (Luhn-checked), SSNs and long random strings are refused by `sensitiveReason()` in the browser **and** on the server, for notes the user adds and for anything the AI tries to save. Memory notes sent by a browser are re-checked on the server before they reach the AI. | `public/js/shared/memory-rules.js`, `server/memory/prompt.js` |
+| AI identity | The identity section is always first in the prompt and can't be replaced by `AI_SYSTEM_PROMPT` or custom instructions; a streaming filter rewrites self-introductions as another AI (never inside code). Memory and identity markup can never reach the user. | `server/identity.js` |
 | Brute force / bots | Netlify platform rate limit (10/min per IP), Firebase's own sign-in throttling, access-code lockout (5 tries → 15 min). | `netlify/edge-functions/*.js`, `server/security.js` |
 
 ## Issues found and fixed in this review
@@ -29,7 +32,7 @@ This is an honest record of what protects the site, what was tested, and what ri
 
 ## Test checklist
 
-Automated: `npm test` → **53 passing** (no network or keys needed). Browser checks were run in headless Chrome with a local mock AI at 320×568, 360×740, 390×844, 768×1024 and 1280×800, light and dark.
+Automated: `npm test` → **75 passing** (no network or keys needed). Browser checks were run in headless Chrome with a local mock AI at 320×568, 360×740, 390×844, 768×1024 and 1280×800, light and dark.
 
 | Check | Result |
 |---|---|
@@ -51,6 +54,13 @@ Automated: `npm test` → **53 passing** (no network or keys needed). Browser ch
 | Mobile: drawer, swipe-close, bottom-sheet menus, safe areas, 16px fields, 44px targets, toasts don't cover the composer | ✅ browser |
 | Chat history: saved, reloaded, images restored from IndexedDB, deleted with the conversation | ✅ browser |
 | Unauthorized access (no token, expired, wrong project, forged, `alg:none`, unverified email) refused | ✅ automated |
+| v0.3.0: the AI always introduces itself as Drone Hive AI ("I'm LFM2…" from a free model is rewritten, even split across stream chunks; code blocks untouched; honest answer when asked what model powers it) | ✅ automated + browser (mock AI) |
+| v0.3.0: logo tile in sidebar, header (collapsed sidebar / phones), AI replies, loading screen and sign-in screen; no stretching; light + dark | ✅ browser (1280×800, 390×844 dark, 320×568) |
+| v0.3.0: contact email in About & Contact and on the sign-in screen; `mailto:` link with subject; copy button | ✅ browser |
+| v0.3.0: memories created (chat + manual), edited, deleted, cleared; persist after reload; used in a new conversation; not used when memory is off | ✅ browser (browser storage) + automated (account storage with stubbed Firestore) |
+| v0.3.0: accounts can't see or change each other's memories (account storage and per-account browser lists); browser-sent notes ignored in account mode | ✅ automated |
+| v0.3.0: secrets refused as memories (typed in Settings, said in chat, or written by the AI) | ✅ automated + browser |
+| v0.3.0: existing providers, Default/Automatic selection and fallback unchanged; no voice/audio features added | ✅ automated (all 53 earlier tests still pass) |
 | Live site (Netlify edge): new code running, all 4 providers detected, Gemini found from existing settings, sign-in screen shown to visitors, manifest served, Netlify secret scan clean | ✅ checked after deploy (Nov 12, 2026) |
 | A real signed-in chat (text + image) on the live site | ⏳ needs the owner to sign in and try — not possible without an account |
 
@@ -67,4 +77,7 @@ Things that could not be tested here: a real phone's on-screen keyboard (logic u
 6. **Chats and images are stored in the user's browser.** Anyone using the same browser profile can see them.
 7. **The Firebase web API key is public by design.** Restrict it in Google Cloud Console → Credentials to your site's domain(s) for extra safety.
 8. **Prompt injection** (users trying to make the AI misbehave) can't be fully prevented; the AI has no tools, files or secrets to leak, so the impact is limited to what it writes.
-9. **Account security matters most.** Your keys live in Netlify, GitHub, Firebase and the AI providers' dashboards — use two-factor login on all of them, and never put a payment card on a provider account you don't want billed.
+9. **Memory without accounts lives in the browser.** Until sign-in and Firestore are both set up, memories are stored in each browser (per account) and don't sync between devices. Anyone with access to that browser profile could read them.
+10. **Relevant memories are sent to the AI provider** with each message, like the conversation itself. Memories are short notes and secrets are refused, but treat them like chat content.
+11. **The identity safety net is pattern-based.** It catches the usual self-introductions ("I'm …", "As an AI model trained by …"); an unusual wording from a weak model could still slip through. The locked identity prompt is the main protection.
+12. **Account security matters most.** Your keys live in Netlify, GitHub, Firebase and the AI providers' dashboards — use two-factor login on all of them, and never put a payment card on a provider account you don't want billed.

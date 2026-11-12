@@ -2,7 +2,7 @@ import { $, escapeHtml, formatDateTime, copyText } from './dom.js';
 import { icon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
 import { toast, showImage } from './overlays.js';
-import { SUGGESTED_PROMPTS } from '../config.js';
+import { SUGGESTED_PROMPTS, LIMITS } from '../config.js';
 import { attachmentUrl } from '../core/attachments.js';
 
 const NEAR_BOTTOM = 140;
@@ -25,10 +25,18 @@ export class ChatView {
     this.pendingFrame = null;
     this.stickToBottom = true;
     this.seen = new Set(); // message ids already shown (only new ones animate in)
+    this.editingId = null; // user message being edited in place
 
     this.scroller.addEventListener('scroll', () => this.#onScroll(), { passive: true });
     this.scrollBtn.addEventListener('click', () => this.scrollToBottom(true));
     this.content.addEventListener('click', (e) => this.#onClick(e));
+    this.content.addEventListener('keydown', (e) => this.#onEditKey(e));
+    this.content.addEventListener('input', (e) => {
+      if (e.target.classList.contains('edit-input')) {
+        this.editDraft = e.target.value; // survives a re-render while editing
+        this.#autoGrow(e.target);
+      }
+    });
   }
 
   // ── rendering ──────────────────────────────────────────
@@ -46,11 +54,24 @@ export class ChatView {
       return;
     }
     const switched = this.renderedId !== conv.id;
-    if (switched) this.seen = new Set(conv.messages.map((m) => m.id));
-    this.content.innerHTML = `<div class="messages">${conv.messages.map((m, i) => this.#messageHTML(m, i === this.#lastAssistantIndex(conv), i === conv.messages.length - 1)).join('')}</div>`;
+    if (switched) {
+      this.seen = new Set(conv.messages.map((m) => m.id));
+      this.editingId = null;
+    }
+    const lastUserIndex = conv.messages.findLastIndex((m) => m.role === 'user');
+    this.content.innerHTML = `<div class="messages">${conv.messages.map((m, i) => this.#messageHTML(m, i === this.#lastAssistantIndex(conv), i === conv.messages.length - 1, i === lastUserIndex)).join('')}</div>`;
     this.renderedId = conv.id;
     conv.messages.forEach((m) => this.seen.add(m.id));
     this.#hydrateImages();
+    const editor = this.content.querySelector('.edit-input');
+    if (editor) {
+      this.#autoGrow(editor);
+      if (!editor.dataset.focused) {
+        editor.dataset.focused = '1';
+        editor.focus();
+        editor.setSelectionRange(editor.value.length, editor.value.length);
+      }
+    }
     if (switched) {
       this.stickToBottom = true;
       this.scrollToBottom(false);
@@ -102,7 +123,7 @@ export class ChatView {
     }
     return `
       <div class="welcome">
-        <div class="welcome-mark" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="72" height="72"></div>
+        <div class="welcome-mark" aria-hidden="true"><span class="logo-tile logo-tile-xl"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="576" height="586"></span></div>
         <p class="welcome-eyebrow">${greet}${name ? `, ${escapeHtml(name)}` : ''}</p>
         <h2 class="welcome-title">What are we building today?</h2>
         <p class="welcome-sub">Drone Hive AI helps you write code, untangle ideas and get things done — built by Drone Hive Studios.</p>
@@ -118,7 +139,7 @@ export class ChatView {
       </div>`;
   }
 
-  #messageHTML(m, isLastAssistant, isLast) {
+  #messageHTML(m, isLastAssistant, isLast, isLastUser = false) {
     const enter = this.seen.has(m.id) ? '' : ' enter';
     const time = this.settings.get('showTimestamps') ? `<time datetime="${new Date(m.createdAt).toISOString()}">${formatDateTime(m.createdAt)}</time>` : '';
 
@@ -133,12 +154,26 @@ export class ChatView {
             )
             .join('')}</div>`
         : '';
+      if (this.editingId === m.id) {
+        return `<article class="msg msg-user is-editing" data-msg="${m.id}">
+          ${images}
+          <div class="edit-box">
+            <textarea class="edit-input" rows="1" aria-label="Edit your message" maxlength="${LIMITS.maxMessageChars}">${escapeHtml(this.editDraft ?? m.content)}</textarea>
+            <div class="edit-actions">
+              <span class="edit-hint">Sending replaces the reply below.</span>
+              <button type="button" class="btn btn-sm btn-ghost" data-action="edit-cancel">Cancel</button>
+              <button type="button" class="btn btn-sm btn-primary" data-action="edit-save">${icon('send', { size: 14 })}<span>Send</span></button>
+            </div>
+          </div>
+        </article>`;
+      }
       return `<article class="msg msg-user${enter}" data-msg="${m.id}">
         ${images}
         ${m.content ? `<div class="bubble bubble-user">${escapeHtml(m.content)}</div>` : ''}
         <div class="msg-actions">
           ${time}
           <button type="button" class="act" data-action="copy" title="Copy message" aria-label="Copy message">${icon('copy', { size: 15 })}</button>
+          ${isLastUser && m.content ? `<button type="button" class="act" data-action="edit" title="Edit message" aria-label="Edit message">${icon('pencil', { size: 15 })}</button>` : ''}
         </div>
       </article>`;
     }
@@ -149,7 +184,7 @@ export class ChatView {
     const streaming = m.status === 'streaming';
     const body = this.#aiContentHTML(m);
     return `<article class="msg msg-ai${streaming ? ' is-streaming' : ''}${enter}" data-msg="${m.id}">
-      <div class="ai-avatar" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="18" height="18"></div>
+      <div class="ai-avatar logo-tile" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="576" height="586"></div>
       <div class="ai-body">
         <div class="ai-head">${this.#headHTML(m)}</div>
         <div class="bubble bubble-ai">${body}</div>
@@ -162,13 +197,16 @@ export class ChatView {
     </article>`;
   }
 
-  /** Name + a small, honest "answered by" chip (only once a provider has actually answered). */
+  /**
+   * Name, plus small chips: "Memory updated" when this reply saved something,
+   * and (only if turned on in AI settings) which provider actually answered.
+   */
   #headHTML(m) {
     const tag =
       m.status === 'stopped' ? '<span class="msg-tag">Stopped</span>' : m.status === 'interrupted' ? '<span class="msg-tag">Interrupted</span>' : '';
     const meta = m.meta || {};
     let chip = '';
-    if (meta.providerName || meta.model) {
+    if (this.settings.get('showProviderChip') && (meta.providerName || meta.model)) {
       const name = meta.providerName || meta.model;
       const tip = [
         meta.providerName ? `Answered by ${meta.providerName}` : '',
@@ -178,7 +216,24 @@ export class ChatView {
       ].filter(Boolean).join(' · ');
       chip = `<span class="msg-provider" title="${escapeHtml(tip)}">${meta.mode === 'automatic' ? icon('sparkle', { size: 12 }) : ''}<span>${escapeHtml(name)}</span>${meta.rerouted ? '<i aria-hidden="true">↻</i>' : ''}</span>`;
     }
-    return `<span class="ai-name">Drone Hive AI</span>${chip}${tag}`;
+    return `<span class="ai-head-mark logo-tile" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="576" height="586"></span><span class="ai-name">Drone Hive AI</span>${this.#memoryChip(meta.memory)}${chip}${tag}`;
+  }
+
+  /** "Memory updated" / "Not saved" chip; opens Settings → Memory. */
+  #memoryChip(mem) {
+    if (!mem) return '';
+    const applied = mem.applied || [];
+    const rejected = mem.rejected || [];
+    if (!applied.length && !rejected.length && !mem.error) return '';
+    const verb = { add: 'Saved', update: 'Updated', delete: 'Forgot', clear: 'Cleared all memories' };
+    const lines = [
+      ...applied.map((a) => (a.op === 'clear' ? verb.clear : `${verb[a.op] || 'Saved'}: ${a.text}`)),
+      ...rejected.map((r) => `Not saved: ${r.reason}`),
+      ...(mem.error ? [mem.error] : []),
+    ];
+    const ok = applied.length > 0;
+    const label = ok ? (applied.every((a) => a.op === 'delete') ? 'Memory removed' : 'Memory updated') : 'Memory not saved';
+    return `<button type="button" class="msg-memory${ok ? '' : ' is-warn'}" data-action="open-memory" title="${escapeHtml(lines.join('\n'))}" aria-label="${escapeHtml(`${label}. ${lines.join('. ')}. Open memory settings`)}">${icon(ok ? 'brain' : 'alert', { size: 12 })}<span>${label}</span></button>`;
   }
 
   #aiContentHTML(m) {
@@ -193,7 +248,7 @@ export class ChatView {
       return `<div class="md">${body}</div>`;
     }
     if (streaming) {
-      const label = m.meta?.routing === 'automatic' ? 'Choosing the best AI…' : m.meta?.providerName ? 'Writing…' : 'Thinking…';
+      const label = m.meta?.providerName ? 'Writing…' : 'Thinking…';
       return `<div class="thinking" role="status"><span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="thinking-label">${label}</span></div>`;
     }
     return '';
@@ -237,6 +292,19 @@ export class ChatView {
 
     if (action === 'prompt') return this.actions.usePrompt(SUGGESTED_PROMPTS[Number(btn.dataset.i)].prompt);
     if (action === 'open-ai-settings') return this.actions.openSettings('ai');
+    if (action === 'open-memory') return this.actions.openSettings('memory');
+    if (action === 'edit') {
+      if (this.actions.canEdit && !this.actions.canEdit()) return toast('Wait for the current reply to finish, or stop it first.');
+      this.editingId = msgId;
+      this.editDraft = null;
+      return this.render();
+    }
+    if (action === 'edit-cancel') {
+      this.editingId = null;
+      this.editDraft = null;
+      return this.render();
+    }
+    if (action === 'edit-save') return this.#saveEdit(msgEl);
     if (action === 'open-model-picker') return this.actions.openModelPicker?.();
     if (action === 'view-image') {
       const img = btn.querySelector('img');
@@ -254,6 +322,38 @@ export class ChatView {
       const code = btn.closest('.code-block')?.querySelector('code')?.textContent || '';
       if (await copyText(code)) this.#flash(btn, true);
     }
+  }
+
+  #saveEdit(msgEl) {
+    const input = msgEl?.querySelector('.edit-input');
+    if (!input) return;
+    const id = msgEl.dataset.msg;
+    this.editingId = null;
+    this.editDraft = null;
+    if (!this.actions.editAndResend(id, input.value)) {
+      this.editDraft = input.value;
+      this.editingId = id;
+      this.render();
+    }
+  }
+
+  #onEditKey(e) {
+    if (!e.target.classList?.contains('edit-input')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      this.editingId = null;
+      this.editDraft = null;
+      this.render();
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || (!e.shiftKey && this.settings.get('enterToSend') && !matchMedia('(pointer: coarse)').matches))) {
+      e.preventDefault();
+      this.#saveEdit(e.target.closest('[data-msg]'));
+    }
+  }
+
+  #autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }
 
   /** Loads stored images into <img> tags (object URLs from IndexedDB). */

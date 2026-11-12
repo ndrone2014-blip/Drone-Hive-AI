@@ -1,21 +1,28 @@
-import { html, escapeHtml, formatBytes, formatDateTime } from './dom.js';
+import { html, escapeHtml, formatBytes, formatDateTime, copyText } from './dom.js';
 import { icon } from './icons.js';
-import { APP, AI_MODES } from '../config.js';
+import { toast, confirmDialog } from './overlays.js';
+import { APP, AI_MODES, contactLink } from '../config.js';
+import { MEMORY_CATEGORIES, MEMORY_LIMITS } from '../shared/memory-rules.js';
 
 const SECTIONS = [
   { id: 'general', label: 'General', icon: 'sliders' },
   { id: 'account', label: 'Account', icon: 'user', when: (m) => m.auth?.required },
   { id: 'ai', label: 'AI Configuration', icon: 'cpu' },
+  { id: 'memory', label: 'Memory', icon: 'brain' },
   { id: 'data', label: 'Data & Privacy', icon: 'shield' },
-  { id: 'about', label: 'About', icon: 'info' },
+  { id: 'about', label: 'About & Contact', icon: 'info' },
 ];
 
 /**
  * Settings dashboard (modal). Every control writes straight to SettingsStore.
  */
 export class SettingsModal {
-  constructor({ settings, store, connection, auth, actions, getQuota = () => null }) {
+  constructor({ settings, store, connection, auth, memory, actions, getQuota = () => null }) {
     this.auth = auth;
+    this.memory = memory;
+    this.memEditId = null; // memory being edited
+    this.memDraft = ''; // text in the "add a memory" box
+    this.memQuery = '';
     this.getQuota = getQuota;
     this.settings = settings;
     this.store = store;
@@ -35,6 +42,9 @@ export class SettingsModal {
     });
     store.on('change', () => {
       if (this.el && this.section === 'data') this.#renderSection();
+    });
+    memory?.on('change', () => {
+      if (this.el && this.section === 'memory') this.#renderSection();
     });
   }
 
@@ -108,6 +118,7 @@ export class SettingsModal {
     content.addEventListener('click', (e) => this.#onClick(e));
     content.addEventListener('change', (e) => this.#onChange(e));
     content.addEventListener('input', (e) => this.#onInput(e));
+    content.addEventListener('submit', (e) => this.#onSubmit(e));
   }
 
   #sections() {
@@ -115,9 +126,13 @@ export class SettingsModal {
   }
 
   #renderNav() {
-    this.el.querySelector('#settings-tabs').innerHTML = this.#sections().map(
+    const tabs = this.el.querySelector('#settings-tabs');
+    tabs.innerHTML = this.#sections().map(
       (s) => `<button type="button" role="tab" class="settings-tab${s.id === this.section ? ' active' : ''}" aria-selected="${s.id === this.section}" data-section="${s.id}">${icon(s.icon, { size: 17 })}<span>${s.label}</span></button>`,
     ).join('');
+    // Phones show the tabs in a scrolling row: keep the open one visible.
+    const active = tabs.querySelector('.active');
+    if (active && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = Math.max(0, active.offsetLeft - (tabs.clientWidth - active.offsetWidth) / 2);
   }
 
   #renderSection() {
@@ -125,12 +140,18 @@ export class SettingsModal {
     const keepScroll = content.dataset.section === this.section ? content.scrollTop : 0;
     const active = document.activeElement;
     const activeKey = content.contains(active) ? active.dataset.setting : null;
-    const renderers = { general: () => this.#general(), account: () => this.#account(), ai: () => this.#ai(), data: () => this.#data(), about: () => this.#about() };
+    const renderers = { general: () => this.#general(), account: () => this.#account(), ai: () => this.#ai(), memory: () => this.#memory(), data: () => this.#data(), about: () => this.#about() };
     content.innerHTML = renderers[this.section]();
     content.querySelectorAll('[data-pct]').forEach((el) => (el.style.width = `${el.dataset.pct}%`));
     content.dataset.section = this.section;
     content.scrollTop = keepScroll;
     if (activeKey) content.querySelector(`[data-setting="${activeKey}"]`)?.focus();
+    const editBox = content.querySelector('.mem-edit textarea');
+    if (editBox && !editBox.dataset.focused) {
+      editBox.dataset.focused = '1';
+      editBox.focus();
+      editBox.setSelectionRange(editBox.value.length, editBox.value.length);
+    }
   }
 
   // ── sections ──────────────────────────────────────────
@@ -307,6 +328,7 @@ export class SettingsModal {
       <div class="group">
         <div class="group-label">Responses</div>
         ${toggleRow('streamResponses', s.streamResponses, 'Stream responses', 'Show the reply word-by-word as it is written.')}
+        ${toggleRow('showProviderChip', s.showProviderChip, 'Show which AI answered', 'Technical: adds a small label with the AI provider and model to each reply. Every reply comes from Drone Hive AI either way.')}
         <div class="row">
           <span class="row-text"><span class="row-title">Creativity (temperature)</span><span class="row-sub">Lower is more focused, higher is more creative.</span></span>
           <div class="temp-control">
@@ -368,7 +390,7 @@ export class SettingsModal {
         <div class="group-label">Local storage</div>
         <p class="group-note">${icon('database', { size: 15 })}<span>${
           st.persistent
-            ? 'Conversations, settings and attached images are saved only in this browser. They are not stored on the Drone Hive server. Only the messages (and images) you send are passed through the server to the AI provider to generate a reply. Images are shrunk and cleaned of hidden data such as GPS location before sending. Clearing your browser data or using another device will not show these chats.'
+            ? 'Conversations, settings and attached images are saved only in this browser. They are not stored on the Drone Hive server (memories are managed separately in Settings → Memory). Only the messages (and images) you send are passed through the server to the AI provider to generate a reply. Images are shrunk and cleaned of hidden data such as GPS location before sending. Clearing your browser data or using another device will not show these chats.'
             : 'Your browser is blocking local storage (for example in private mode), so conversations will be lost when this tab closes.'
         }</span></p>
       </div>
@@ -413,19 +435,211 @@ export class SettingsModal {
   #about() {
     return `
       <div class="about-hero">
-        <img class="logo-ink about-logo" src="/assets/brand/logo-full.png" alt="Drone Hive Studios" width="220">
+        <img class="logo-ink about-logo" src="/assets/brand/logo-full.png" alt="Drone Hive Studios" width="774" height="503">
         <div class="about-tags"><span>Websites</span><i></i><span>Bots</span><i></i><span>Games</span></div>
+      </div>
+      <div class="group">
+        <div class="group-label">Contact us</div>
+        <div class="contact-card">
+          <span class="contact-icon">${icon('mail', { size: 20 })}</span>
+          <div class="contact-text">
+            <b>Questions, feedback or a problem?</b>
+            <span>Email the Drone Hive Studios team — we read every message.</span>
+            <a class="contact-email" href="${escapeHtml(contactLink('Drone Hive AI — question or feedback'))}">${escapeHtml(APP.email)}</a>
+          </div>
+          <div class="contact-actions">
+            <a class="btn btn-sm btn-primary" href="${escapeHtml(contactLink('Drone Hive AI — question or feedback'))}">${icon('mail', { size: 14 })}<span>Email us</span></a>
+            <button type="button" class="btn btn-sm btn-secondary" data-action="copy-email">${icon('copy', { size: 14 })}<span>Copy address</span></button>
+          </div>
+        </div>
+        <p class="group-foot">“Email us” opens your own email app with a new message. Drone Hive AI doesn’t send email on your behalf.</p>
       </div>
       <div class="group">
         <div class="group-label">Drone Hive AI</div>
         <div class="row"><span class="row-text"><span class="row-title">Version</span></span><span class="chip">v${APP.version}</span></div>
-        <p class="about-text">Drone Hive AI is an AI assistant built by Drone Hive Studios to help with code, ideas and writing. It connects to the AI provider of your choice through a secure server, keeps your conversations on your own device and is designed to grow with new features over time.</p>
+        <div class="row"><span class="row-text"><span class="row-title">Developer</span></span><span class="chip">${escapeHtml(APP.studio)}</span></div>
+        <p class="about-text">Drone Hive AI is the AI assistant built and owned by Drone Hive Studios, made to help with code, ideas and writing. It securely connects to leading AI models behind the scenes, can remember what matters to you (with your permission), and keeps your conversations on your own device.</p>
       </div>
       <div class="group">
         <div class="group-label">Credits</div>
         <p class="about-text"><b>${escapeHtml(APP.credits)}</b></p>
         <p class="about-text muted">Built with plain HTML, CSS and JavaScript and Netlify Edge Functions — no frameworks, no tracking.</p>
       </div>`;
+  }
+
+  #memory() {
+    const s = this.settings.all();
+    const m = this.memory;
+    const account = m?.store === 'account';
+    const signedInAs = this.auth?.signedIn ? this.auth.user?.email : '';
+    const where = account
+      ? 'Saved to your account — private to you and available wherever you sign in.'
+      : signedInAs
+        ? `Saved in this browser for ${escapeHtml(signedInAs)}.`
+        : 'Saved in this browser on this device.';
+    const items = m?.items || [];
+    const q = this.memQuery.trim().toLowerCase();
+    const shown = q ? items.filter((x) => x.text.toLowerCase().includes(q)) : items;
+    const categoryOptions = (selected) =>
+      Object.entries(MEMORY_CATEGORIES)
+        .map(([k, label]) => `<option value="${k}" ${k === selected ? 'selected' : ''}>${label}</option>`)
+        .join('');
+
+    let list;
+    if (!m || m.state === 'locked') list = '<p class="muted">Sign in to see your memories.</p>';
+    else if (m.state === 'loading' && !items.length) list = '<div class="mem-loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading your memories…</div>';
+    else if (m.state === 'error')
+      list = `<div class="mem-error" role="alert">${icon('alert', { size: 16 })}<span>${escapeHtml(m.error || 'Memories couldn’t be loaded.')}</span><button type="button" class="btn btn-sm btn-secondary" data-action="mem-retry">Try again</button></div>`;
+    else if (!items.length)
+      list = `<div class="mem-empty">${icon('brain', { size: 22 })}<p><b>No memories yet.</b> Tell Drone Hive AI about yourself, your projects or how you like answers — or add something above.</p></div>`;
+    else if (!shown.length) list = `<p class="muted">No memories match “${escapeHtml(this.memQuery.trim())}”.</p>`;
+    else {
+      const groups = Object.keys(MEMORY_CATEGORIES)
+        .map((cat) => [cat, shown.filter((x) => x.category === cat).sort((a, b) => b.updatedAt - a.updatedAt)])
+        .filter(([, list]) => list.length);
+      list = groups
+        .map(
+          ([cat, group]) => `<div class="mem-group">
+            <div class="mem-group-label">${MEMORY_CATEGORIES[cat]}</div>
+            ${group
+              .map((x) =>
+                this.memEditId === x.id
+                  ? `<form class="mem-item mem-edit" data-form="memory-edit" data-id="${escapeHtml(x.id)}">
+                      <textarea class="input textarea" name="text" rows="2" maxlength="${MEMORY_LIMITS.maxChars}" aria-label="Edit memory">${escapeHtml(x.text)}</textarea>
+                      <div class="mem-edit-bar">
+                        <select class="input input-sm" name="category" aria-label="Category">${categoryOptions(x.category)}</select>
+                        <span class="mem-edit-btns">
+                          <button type="button" class="btn btn-sm btn-ghost" data-action="mem-cancel">Cancel</button>
+                          <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                        </span>
+                      </div>
+                    </form>`
+                  : `<div class="mem-item" data-id="${escapeHtml(x.id)}">
+                      <div class="mem-body">
+                        <p class="mem-text">${escapeHtml(x.text)}</p>
+                        <span class="mem-meta">${x.source === 'manual' ? 'Added by you' : 'Learned in chat'} · ${formatDateTime(x.updatedAt)}</span>
+                      </div>
+                      <div class="mem-actions">
+                        <button type="button" class="icon-btn" data-action="mem-edit" data-id="${escapeHtml(x.id)}" aria-label="Edit memory: ${escapeHtml(x.text)}" title="Edit">${icon('pencil', { size: 16 })}</button>
+                        <button type="button" class="icon-btn icon-btn-danger" data-action="mem-delete" data-id="${escapeHtml(x.id)}" aria-label="Delete memory: ${escapeHtml(x.text)}" title="Delete">${icon('trash', { size: 16 })}</button>
+                      </div>
+                    </div>`,
+              )
+              .join('')}
+          </div>`,
+        )
+        .join('');
+    }
+    const canEdit = m && m.state !== 'locked' && m.state !== 'error';
+    const importable = account ? m.localCount : 0;
+
+    return `
+      <h3 class="section-title">Memory</h3>
+      <p class="section-sub">Drone Hive AI can remember useful things about you between conversations, so you don’t have to repeat yourself.</p>
+
+      <label class="memory-hero ${s.memoryEnabled ? 'is-on' : ''}">
+        <span class="memory-hero-icon">${icon('brain', { size: 20 })}</span>
+        <span class="memory-hero-text"><b>${s.memoryEnabled ? 'Memory is on' : 'Memory is off'}</b><span>${s.memoryEnabled ? where : 'Nothing new is saved, and saved memories aren’t used in chats.'}</span></span>
+        <span class="switch"><input type="checkbox" data-setting="memoryEnabled" aria-label="Use memory" ${s.memoryEnabled ? 'checked' : ''}><span class="switch-track"><span class="switch-thumb"></span></span></span>
+      </label>
+
+      <div class="group${s.memoryEnabled ? '' : ' is-dim'}">
+        <div class="group-label">What gets remembered</div>
+        ${toggleRow('memoryAuto', s.memoryAuto, 'Save memories automatically', 'Picks up useful details as you chat — your name, projects, coding languages, tools and preferences. When off, it only saves something when you say “remember …”.')}
+        ${toggleRow('memoryRecentChats', s.memoryRecentChats, 'Reference recent chats', 'Lets Drone Hive AI see the titles of your recent conversations, so it notices when you return to a project.')}
+      </div>
+
+      <div class="group">
+        <div class="group-label mem-head"><span>Saved memories</span><span class="mem-count">${items.length} / ${MEMORY_LIMITS.maxItems}</span></div>
+        ${
+          canEdit
+            ? `<form class="mem-add" data-form="memory-add">
+                <input class="input" name="text" type="text" maxlength="${MEMORY_LIMITS.maxChars}" placeholder="Add something to remember…" aria-label="New memory" value="${escapeHtml(this.memDraft)}" autocomplete="off">
+                <div class="mem-add-bar">
+                  <select class="input input-sm" name="category" aria-label="Category">${categoryOptions('about')}</select>
+                  <button type="submit" class="btn btn-sm btn-primary">${icon('plus', { size: 14 })}<span>Add memory</span></button>
+                </div>
+              </form>`
+            : ''
+        }
+        ${items.length > 6 ? `<input class="input input-sm mem-search" type="search" placeholder="Search memories" aria-label="Search memories" value="${escapeHtml(this.memQuery)}" data-mem-search>` : ''}
+        <div class="mem-list">${list}</div>
+        ${
+          importable
+            ? `<div class="row"><span class="row-text"><span class="row-title">Memories in this browser</span><span class="row-sub">${importable} memor${importable === 1 ? 'y was' : 'ies were'} saved in this browser before account storage was turned on.</span></span><button type="button" class="btn btn-sm btn-secondary" data-action="mem-import">${icon('download', { size: 14 })}<span>Copy to account</span></button></div>`
+            : ''
+        }
+      </div>
+
+      <div class="group">
+        <div class="group-label">How memory works</div>
+        <ul class="memory-explain">
+          <li>${icon('sparkle', { size: 16 })}<span><b>It learns as you chat.</b> When you share something useful for later, Drone Hive AI saves a short note and shows “Memory updated” on its reply. You can also say “remember …” or “forget …”.</span></li>
+          <li>${icon('search', { size: 16 })}<span><b>Only what’s relevant is used.</b> Notes are added to a conversation only when they help with what you’re asking. Drone Hive AI never pretends to remember things that weren’t saved.</span></li>
+          <li>${icon('pencil', { size: 16 })}<span><b>You’re in control.</b> View, edit or delete anything here, or turn memory off at any time.</span></li>
+          <li>${icon('shield', { size: 16 })}<span><b>Secrets are never saved.</b> Passwords, API keys, tokens and card numbers are refused automatically.</span></li>
+          <li>${icon('database', { size: 16 })}<span><b>Where it’s kept.</b> ${
+            account
+              ? 'Your memories are stored with your account on the Drone Hive AI server. Other accounts can never see them.'
+              : 'Your memories are stored in this browser only, separately for each account. Clearing this site’s data deletes them.'
+          } Relevant notes are sent with your messages to the AI that writes the reply.</span></li>
+        </ul>
+      </div>
+
+      <div class="group danger-zone">
+        <div class="group-label">Manage</div>
+        <div class="row">
+          <span class="row-text"><span class="row-title">Download memories</span><span class="row-sub">Save a copy of everything Drone Hive AI remembers as a JSON file.</span></span>
+          <button type="button" class="btn btn-sm btn-secondary" data-action="mem-export" ${items.length ? '' : 'disabled'}>${icon('download', { size: 14 })}<span>Download</span></button>
+        </div>
+        <div class="row">
+          <span class="row-text"><span class="row-title">Clear all memories</span><span class="row-sub">Permanently deletes everything Drone Hive AI remembers about you${account ? ' on every device' : ' in this browser'}.</span></span>
+          <button type="button" class="btn btn-sm btn-danger" data-action="mem-clear" ${items.length && canEdit ? '' : 'disabled'}>${icon('trash', { size: 14 })}<span>Clear all</span></button>
+        </div>
+      </div>`;
+  }
+
+  async #onSubmit(e) {
+    const form = e.target.closest('form[data-form]');
+    if (!form) return;
+    e.preventDefault();
+    const btn = form.querySelector('[type="submit"]');
+    const text = form.elements.text?.value || '';
+    const category = form.elements.category?.value;
+    if (btn) btn.disabled = true;
+    let result;
+    if (form.dataset.form === 'memory-add') {
+      if (!text.trim()) {
+        if (btn) btn.disabled = false;
+        form.elements.text.focus();
+        return;
+      }
+      result = await this.memory.add(text, category);
+      if (result.ok) {
+        this.memDraft = '';
+        toast('Memory saved', { type: 'success' });
+        this.#renderSection();
+        this.el?.querySelector('.mem-add input')?.focus();
+        return;
+      }
+    } else if (form.dataset.form === 'memory-edit') {
+      result = await this.memory.update(form.dataset.id, { text, category });
+      if (result.ok) {
+        this.memEditId = null;
+        toast('Memory updated', { type: 'success' });
+        this.#renderSection();
+        return;
+      }
+    }
+    if (btn) btn.disabled = false;
+    if (result && !result.ok) {
+      // Don't leave a password or key sitting on screen.
+      if (result.sensitive && form.elements.text) {
+        form.elements.text.value = '';
+        if (form.dataset.form === 'memory-add') this.memDraft = '';
+      }
+      toast(result.message, { type: 'error', duration: 5000 });
+    }
   }
 
   // ── events ────────────────────────────────────────────
@@ -457,6 +671,48 @@ export class SettingsModal {
         await this.actions.resetSettings();
         this.#renderSection();
         break;
+      case 'copy-email':
+        if (await copyText(APP.email)) toast('Email address copied', { type: 'success' });
+        else toast(APP.email);
+        break;
+      case 'mem-edit':
+        this.memEditId = btn.dataset.id;
+        this.#renderSection();
+        break;
+      case 'mem-cancel':
+        this.memEditId = null;
+        this.#renderSection();
+        break;
+      case 'mem-delete': {
+        const r = await this.memory.remove(btn.dataset.id);
+        toast(r.ok ? 'Memory deleted' : r.message, { type: r.ok ? 'success' : 'error' });
+        break;
+      }
+      case 'mem-clear': {
+        const ok = await confirmDialog({
+          title: 'Clear all memories?',
+          body: 'Drone Hive AI will forget everything it has saved about you. This can’t be undone.',
+          confirmText: 'Clear memories',
+          danger: true,
+        });
+        if (!ok) break;
+        const r = await this.memory.clear();
+        toast(r.ok ? 'All memories cleared' : r.message, { type: r.ok ? 'success' : 'error' });
+        break;
+      }
+      case 'mem-export':
+        this.actions.exportMemories();
+        break;
+      case 'mem-import': {
+        btn.disabled = true;
+        const r = await this.memory.importLocal();
+        toast(r.message, { type: r.ok ? 'success' : 'error' });
+        this.#renderSection();
+        break;
+      }
+      case 'mem-retry':
+        this.memory.reload();
+        break;
       default:
     }
   }
@@ -470,7 +726,10 @@ export class SettingsModal {
     }
     const key = t.dataset.setting;
     if (!key) return;
-    if (t.type === 'checkbox') this.settings.set(key, t.checked);
+    if (t.type === 'checkbox') {
+      this.settings.set(key, t.checked);
+      if (this.section === 'memory') this.#renderSection();
+    }
     else if (t.tagName === 'SELECT') {
       const v = t.dataset.kind === 'nullable-number' ? (t.value ? Number(t.value) : null) : t.value;
       this.settings.set(key, v);
@@ -483,6 +742,19 @@ export class SettingsModal {
 
   #onInput(e) {
     const t = e.target;
+    if (t.closest('.mem-add') && t.name === 'text') {
+      this.memDraft = t.value;
+      return;
+    }
+    if (t.dataset.memSearch !== undefined) {
+      this.memQuery = t.value;
+      const pos = t.selectionStart;
+      this.#renderSection();
+      const again = this.el?.querySelector('[data-mem-search]');
+      again?.focus();
+      again?.setSelectionRange(pos, pos);
+      return;
+    }
     const key = t.dataset.setting;
     if (!key) return;
     if (t.type === 'range') {

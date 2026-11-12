@@ -21,8 +21,8 @@ const SCOPE = 'https://www.googleapis.com/auth/datastore';
 
 let tokenCache = { token: null, expires: 0, email: null };
 
-export function getFirestoreConfig() {
-  if (getEnv('USAGE_STORE', '') === 'memory') return null;
+export function getFirestoreConfig({ forUsage = true } = {}) {
+  if (forUsage && getEnv('USAGE_STORE', '') === 'memory') return null;
   let email = getEnv('FIREBASE_CLIENT_EMAIL');
   let key = getEnv('FIREBASE_PRIVATE_KEY');
   let projectId = getEnv('FIREBASE_PROJECT_ID');
@@ -128,4 +128,44 @@ export async function readDoc(cfg, path, { fetchImpl = fetch } = {}) {
     else if ('stringValue' in v) out[k] = v.stringValue;
   }
   return out;
+}
+
+/**
+ * Reads a document's raw Firestore fields plus its updateTime (used for safe
+ * read-modify-write). Returns null if the document doesn't exist.
+ */
+export async function getDocument(cfg, path, { fetchImpl = fetch, signal } = {}) {
+  const token = await getAccessToken(cfg, fetchImpl);
+  const res = await fetchImpl(`${docsBase(cfg)}/${path}`, { headers: { authorization: `Bearer ${token}` }, signal });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Firestore read failed (HTTP ${res.status})`);
+  const data = await res.json();
+  return { fields: data.fields || {}, updateTime: data.updateTime || null };
+}
+
+/** Thrown when a document changed between our read and our write. */
+export class FirestoreConflict extends Error {}
+
+/**
+ * Replaces a document's fields, but only if it hasn't changed since it was
+ * read (`updateTime`), or doesn't exist yet (`updateTime === null`).
+ * Pass `remove: true` to delete the document instead.
+ */
+export async function writeDocument(cfg, path, fields, { updateTime = undefined, remove = false, fetchImpl = fetch, signal } = {}) {
+  const token = await getAccessToken(cfg, fetchImpl);
+  const name = docName(cfg, path);
+  const precondition = updateTime === undefined ? undefined : updateTime ? { updateTime } : { exists: false };
+  const write = remove ? { delete: name } : { update: { name, fields } };
+  if (precondition && !(remove && !updateTime)) write.currentDocument = precondition;
+  const res = await fetchImpl(`${docsBase(cfg)}:commit`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ writes: [write] }),
+    signal,
+  });
+  if (res.status === 409 || res.status === 412 || (res.status === 400 && /FAILED_PRECONDITION|ALREADY_EXISTS/.test(await res.clone().text().catch(() => '')))) {
+    throw new FirestoreConflict('Document changed during the update');
+  }
+  if (!res.ok) throw new Error(`Firestore write failed (HTTP ${res.status})`);
+  return true;
 }

@@ -23,7 +23,7 @@ const PORT = Number(process.env.PORT) || 8888;
 const HOST = process.env.HOST || '127.0.0.1';
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
-const { handleChatRequest, handleStatusRequest } = await import(pathToFileURL(path.join(ROOT, 'server', 'handlers.js')).href);
+const { handleChatRequest, handleStatusRequest, handleMemoryRequest } = await import(pathToFileURL(path.join(ROOT, 'server', 'handlers.js')).href);
 
 // Use the same security headers as Netlify (from netlify.toml), so problems
 // like a blocked inline style show up locally too.
@@ -41,7 +41,7 @@ const PAGE_HEADERS = (() => {
   }
 })();
 
-const ROUTES = { '/api/chat': handleChatRequest, '/api/status': handleStatusRequest };
+const ROUTES = { '/api/chat': handleChatRequest, '/api/status': handleStatusRequest, '/api/memory': handleMemoryRequest };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

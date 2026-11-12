@@ -11,6 +11,15 @@
 }
 .main:not(.is-welcome) .topbar { border-bottom-color: var(--border); }
 .topbar-left { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* Brand in the header: shown whenever the sidebar (and its logo) is hidden. */
+.topbar-brand { display: none; align-items: center; gap: 8px; margin: 0 2px 0 4px; padding: 3px 6px 3px 3px; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; flex-shrink: 0; }
+.topbar-brand:hover { background: var(--hover); }
+.topbar-brand-name { font-family: var(--font-display); font-weight: 800; font-size: 0.98rem; letter-spacing: -0.01em; white-space: nowrap; }
+.topbar-brand-name b { color: var(--gold); }
+.sidebar-collapsed .topbar-brand { display: inline-flex; }
+@media (max-width: 860px) { .topbar-brand { display: inline-flex; } }
+.sidebar-collapsed .main:not(.is-welcome) .topbar-title::before { content: '/'; margin-right: 8px; color: var(--border-strong); font-weight: 400; }
+@media (min-width: 641px) and (max-width: 860px) { .main:not(.is-welcome) .topbar-title::before { content: '/'; margin-right: 8px; color: var(--border-strong); font-weight: 400; } }
 .topbar-title { margin: 0 0 0 6px; font-size: 0.98rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .is-welcome .topbar-title { color: var(--text-3); font-weight: 500; }
 
@@ -58,9 +67,9 @@
   mask-image: radial-gradient(closest-side, #000 30%, transparent 100%);
   pointer-events: none;
 }
-.welcome-mark { position: relative; display: grid; place-items: center; width: 92px; height: 92px; margin-bottom: 18px; }
-.welcome-mark::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: radial-gradient(circle, var(--gold-soft) 0%, transparent 70%); }
-.welcome-mark img { position: relative; width: 72px; height: 72px; object-fit: contain; }
+.welcome-mark { position: relative; display: grid; place-items: center; width: 108px; height: 108px; margin-bottom: 14px; }
+.welcome-mark::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; background: radial-gradient(circle, var(--gold-soft) 0%, transparent 68%); }
+.welcome-mark .logo-tile { box-shadow: var(--shadow); }
 .welcome-eyebrow { margin: 0 0 6px; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent-text); }
 .welcome-title { margin: 0; font-family: var(--font-display); font-size: clamp(1.7rem, 3.2vw, 2.3rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
 .welcome-sub { margin: 10px 0 26px; max-width: 470px; color: var(--text-2); font-size: 1rem; }
@@ -112,15 +121,15 @@
 }
 
 .msg-ai { gap: 12px; align-items: flex-start; }
-.ai-avatar {
-  flex: 0 0 32px; width: 32px; height: 32px; display: grid; place-items: center; margin-top: 2px;
-  background: var(--surface); border: 1px solid var(--border);
-  clip-path: polygon(25% 2%, 75% 2%, 100% 50%, 75% 98%, 25% 98%, 0 50%);
-}
-.ai-avatar img { width: 18px; height: 18px; object-fit: contain; }
+.ai-avatar { --tile: 32px; margin-top: 1px; }
 .ai-body { flex: 1; min-width: 0; }
-.ai-head { display: flex; align-items: center; gap: 8px; margin: 3px 0 6px; font-size: 0.85rem; }
-.ai-name { font-weight: 700; }
+.ai-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 22px; margin: 4px 0 6px; font-size: 0.85rem; }
+.ai-name { font-weight: 700; letter-spacing: -0.005em; }
+.ai-head-mark { --tile: 22px; display: none; }
+/* "Memory updated" chip on a reply */
+.msg-memory { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 99px; background: var(--gold-soft); color: var(--accent-text); border: 1px solid color-mix(in srgb, var(--gold) 28%, transparent); font-size: 0.72rem; font-weight: 600; white-space: nowrap; transition: background var(--dur), border-color var(--dur); animation: pop 200ms var(--ease); }
+.msg-memory:hover { border-color: var(--gold); }
+.msg-memory.is-warn { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 25%, transparent); }
 .msg-provider { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
 .msg-provider .icon { color: var(--accent-text); }
 .msg-provider i { font-style: normal; color: var(--text-3); }
@@ -128,7 +137,15 @@
 .bubble-ai {
   padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
   border-radius: 6px 18px 18px 18px; overflow-wrap: anywhere;
+  box-shadow: var(--shadow-sm);
 }
+
+/* Editing your last message in place */
+.msg-user.is-editing { align-items: stretch; }
+.edit-box { width: min(100%, 640px); margin-left: auto; padding: 10px 12px 8px; border-radius: 18px; background: var(--bg-elev); border: 1px solid var(--gold); box-shadow: 0 0 0 4px var(--gold-soft); }
+.edit-input { display: block; width: 100%; min-height: 26px; max-height: 40vh; padding: 2px 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--text); font-size: 1rem; line-height: 1.55; }
+.edit-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.edit-hint { margin-right: auto; font-size: 0.76rem; color: var(--text-3); }
 .is-streaming .bubble-ai { border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); }
 
 .msg-actions { display: flex; align-items: center; gap: 2px; margin-top: 4px; min-height: 28px; color: var(--text-3); font-size: 0.75rem; opacity: 0; transition: opacity var(--dur); }
@@ -265,13 +282,16 @@
   .prompt-grid { grid-template-columns: 1fr; gap: 8px; }
   .prompt-card { padding: 12px; min-height: 60px; }
   .prompt-card:nth-child(n + 3) { display: none; }
-  .welcome-mark { width: 72px; height: 72px; margin-bottom: 12px; }
-  .welcome-mark img { width: 56px; height: 56px; }
+  .welcome-mark { width: 84px; height: 84px; margin-bottom: 10px; }
+  .welcome-mark .logo-tile { --tile: 60px; }
   .welcome-sub { margin-bottom: 18px; font-size: 0.95rem; }
   .bubble-user { max-width: 88%; }
   .msg-images { width: 88%; }
   .msg-ai { gap: 0; }
   .ai-avatar { display: none; }
+  .ai-head-mark { display: inline-grid; }
+  .main:not(.is-welcome) .topbar-brand-name { display: none; }
+  .edit-hint { display: none; }
   .bubble-ai { padding: 12px 14px; }
   .composer-hint { display: none; }
   .model-pill { height: 36px; max-width: 46vw; padding: 0 8px 0 10px; }
@@ -283,8 +303,8 @@
   .messages { gap: 18px; }
 }
 @media (max-height: 640px) {
-  .welcome-mark { width: 56px; height: 56px; margin-bottom: 8px; }
-  .welcome-mark img { width: 44px; height: 44px; }
+  .welcome-mark { width: 64px; height: 64px; margin-bottom: 8px; }
+  .welcome-mark .logo-tile { --tile: 48px; }
   .welcome-title { font-size: 1.5rem; }
 }
 /* While the on-screen keyboard is open, give the conversation every pixel. */
