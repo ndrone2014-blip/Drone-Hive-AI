@@ -40,11 +40,13 @@ export class Sidebar {
     this.search.addEventListener('focus', () => {
       if (MOBILE_QUERY.matches && !document.documentElement.classList.contains('sidebar-open')) this.toggle(true);
     });
-    $('#brand-home').addEventListener('click', (e) => {
-      e.preventDefault();
-      this.actions.newChat();
-      this.closeMobile();
-    });
+    for (const id of ['#brand-home', '#topbar-brand']) {
+      $(id)?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.actions.newChat();
+        this.closeMobile();
+      });
+    }
     $('#sidebar-collapse').addEventListener('click', () => this.toggle(false));
     $('#sidebar-expand').addEventListener('click', () => this.toggle(true));
     $('#sidebar-backdrop').addEventListener('click', () => this.closeMobile());

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Drone Hive AI</title>
   <meta name="description" content="Drone Hive AI — an AI assistant for code, ideas and writing by Drone Hive Studios.">
+  <meta name="author" content="Drone Hive Studios">
   <meta name="application-name" content="Drone Hive AI">
   <meta name="theme-color" content="#F7F6F2" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0F0E0C" media="(prefers-color-scheme: dark)">
@@ -42,12 +43,19 @@
   <link rel="stylesheet" href="/css/auth.css">
 </head>
 <body>
+  <!-- Loading screen: removed as soon as the app has started (js/main.js) -->
+  <div class="boot" id="boot" role="status" aria-label="Loading Drone Hive AI">
+    <span class="logo-tile logo-tile-lg"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="576" height="586"></span>
+    <span class="boot-name">Drone Hive <b>AI</b></span>
+    <span class="boot-bar" aria-hidden="true"></span>
+  </div>
+
   <div class="app" id="app">
     <!-- ── Sidebar ─────────────────────────────────────── -->
     <aside class="sidebar" id="sidebar" aria-label="Conversations">
       <div class="sidebar-head">
         <a class="brand" href="/" id="brand-home" aria-label="Drone Hive AI home">
-          <img class="brand-emblem logo-ink" src="/assets/brand/emblem.png" alt="" width="30" height="30">
+          <span class="logo-tile" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="576" height="586"></span>
           <span class="brand-text">
             <span class="brand-name">Drone Hive <b>AI</b></span>
             <span class="brand-sub">Drone Hive Studios</span>
@@ -85,6 +93,10 @@
         <div class="topbar-left">
           <button class="icon-btn" id="sidebar-expand" type="button" title="Open sidebar" aria-label="Open sidebar"></button>
           <button class="icon-btn" id="topbar-new-chat" type="button" title="New chat" aria-label="New chat"></button>
+          <a class="topbar-brand" href="/" id="topbar-brand" aria-label="Drone Hive AI home">
+            <span class="logo-tile logo-tile-sm" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="576" height="586"></span>
+            <span class="topbar-brand-name">Drone Hive <b>AI</b></span>
+          </a>
           <h1 class="topbar-title" id="topbar-title">New conversation</h1>
         </div>
         <button class="model-pill" id="model-pill" type="button" data-state="checking" aria-haspopup="menu" aria-expanded="false" title="Choose an AI"></button>

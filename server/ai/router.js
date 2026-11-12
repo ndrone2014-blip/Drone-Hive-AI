@@ -2,6 +2,7 @@ import { getEnv, getEnvInt } from '../env.js';
 import { PROVIDERS, getProvider } from './providers/index.js';
 import { AIError, ERROR_CODES, isFallbackError, toAIError, redact } from './errors.js';
 import { limitImages } from './messages.js';
+import { technicalNote } from '../identity.js';
 
 /**
  * Chooses which AI provider (and model) answers a request, and falls back to
@@ -191,7 +192,9 @@ export async function runRoute(plan, { system, messages, maxTokens, temperature,
       if (signal?.aborted) throw new AIError(ERROR_CODES.ABORTED, 'The request was cancelled.', 499);
       if (attempts++ >= MAX_ATTEMPTS) break;
       try {
-        const events = await openAndPeek(step.provider, { model, system, messages: msgs, maxTokens, temperature }, signal, firstTokenMs);
+        // The private technical note names the provider/model actually used for
+        // this attempt, so "what model are you running on?" gets a true answer.
+        const events = await openAndPeek(step.provider, { model, system: system + technicalNote(step.provider, model), messages: msgs, maxTokens, temperature }, signal, firstTokenMs);
         return {
           provider: { id: step.provider.id, name: step.provider.name, shortName: step.provider.shortName || step.provider.name },
           model,

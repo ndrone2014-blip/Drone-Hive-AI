@@ -38,10 +38,11 @@ export async function fetchStatus({ signal } = {}) {
  * Sends a conversation and receives the reply.
  * @param {object} p
  * @param {{role:string, content:string|object[]}[]} p.messages  content parts may include { type:'image', mediaType, data }
- * @param {(event:object)=>void} p.onEvent  called with {type:'start'|'delta'|'done', ...}
+ * @param {object} [p.memory]  memory settings/notes for this request (see core/memory-store.js forRequest)
+ * @param {(event:object)=>void} p.onEvent  called with {type:'start'|'delta'|'memory'|'done', ...}
  * @returns {Promise<{content:string, provider?:object, model?:string, usage?:object, stopReason?:string}>}
  */
-export async function sendChat({ messages, provider, model, options, stream = true, accessCode, authToken, signal, onEvent = () => {} }) {
+export async function sendChat({ messages, provider, model, options, memory, stream = true, accessCode, authToken, signal, onEvent = () => {} }) {
   let res;
   try {
     res = await fetch(API.chat, {
@@ -52,7 +53,7 @@ export async function sendChat({ messages, provider, model, options, stream = tr
         ...(accessCode ? { 'x-dronehive-access': accessCode } : {}),
         ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
       },
-      body: JSON.stringify({ messages, provider, model, options, stream }),
+      body: JSON.stringify({ messages, provider, model, options, memory, stream }),
       signal,
     });
   } catch (err) {
@@ -83,6 +84,7 @@ export async function sendChat({ messages, provider, model, options, stream = tr
     const data = await res.json();
     onEvent({ type: 'start', provider: data.provider, model: data.model, mode: data.mode, rerouted: data.rerouted });
     if (data.message?.content) onEvent({ type: 'delta', text: data.message.content });
+    if (data.memory) onEvent(data.memory);
     onEvent({ type: 'done', stopReason: data.stopReason, usage: data.usage, quota: data.quota });
     return { content: data.message?.content || '', provider: data.provider, model: data.model, mode: data.mode, rerouted: data.rerouted, usage: data.usage, stopReason: data.stopReason, quota: data.quota };
   }

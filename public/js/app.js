@@ -1,6 +1,7 @@
 import { LocalStorageAdapter } from './core/storage.js';
 import { SettingsStore } from './core/settings-store.js';
 import { ConversationStore } from './core/conversation-store.js';
+import { MemoryStore } from './core/memory-store.js';
 import { ConnectionService } from './services/connection.js';
 import { AuthService } from './services/auth.js';
 import { AuthGate } from './ui/auth-gate.js';
@@ -49,6 +50,7 @@ export class App {
     this.connection = new ConnectionService();
     this.auth = new AuthService();
     this.authGate = new AuthGate({ auth: this.auth });
+    this.memory = new MemoryStore({ storage, settings: this.settings, getToken: () => this.auth.getToken() });
 
     this.sending = null; // { convId, msgId, controller }
     this.quota = null; // latest usage summary from the server
@@ -77,6 +79,8 @@ export class App {
         usePrompt: (text) => this.composer.setValue(text, { focus: true }),
         regenerate: (msgId) => this.regenerate(msgId),
         retry: (msgId) => this.retry(msgId),
+        editAndResend: (msgId, text) => this.editAndResend(msgId, text),
+        canEdit: () => !this.sending,
         openSettings: (section) => this.settingsModal.open(section),
         openModelPicker: () => this.picker.open(),
       },
@@ -101,6 +105,7 @@ export class App {
       store: this.store,
       connection: this.connection,
       auth: this.auth,
+      memory: this.memory,
       getQuota: () => this.quota,
       actions: {
         refreshConnection: () => this.connection.refresh(),
@@ -109,6 +114,7 @@ export class App {
         clearAll: () => this.clearAll(),
         resetSettings: () => this.resetSettings(),
         signOut: () => this.signOut(),
+        exportMemories: () => this.exportMemories(),
       },
     });
 
@@ -144,7 +150,7 @@ export class App {
         this.sidebar.renderProfile();
         if (this.chat.main.classList.contains('is-welcome')) this.chat.render();
       }
-      if (['showTimestamps', '*'].includes(key)) this.chat.render();
+      if (['showTimestamps', 'showProviderChip', '*'].includes(key)) this.chat.render();
       if (['enterToSend', '*'].includes(key)) this.composer.updateHint();
       if (['provider', 'model', '*'].includes(key)) this.#renderStatus();
       if (key === 'provider') {
@@ -156,6 +162,7 @@ export class App {
     this.connection.on('change', ({ status }) => {
       // The server tells us whether sign-in is required (and the public Firebase settings).
       if (status?.reachable) this.auth.init(status.auth);
+      this.#syncMemory();
       this.#renderStatus();
       if (this.chat.main.classList.contains('is-welcome')) this.chat.render();
     });
@@ -164,8 +171,33 @@ export class App {
   #bindAuth() {
     this.auth.on('change', ({ state }) => {
       this.sidebar.setAccount(state === 'signed-in' ? this.auth.user : null);
+      this.#syncMemory();
       if (state === 'signed-in') this.composer.focus();
     });
+  }
+
+  /**
+   * Points the memory store at the right place: the signed-in account's
+   * memories (or this browser's guest memories when sign-in is off). Waits
+   * until the server has said whether sign-in is required, so memories are
+   * never loaded for the wrong person.
+   */
+  #syncMemory() {
+    const status = this.connection.status;
+    if (!status?.reachable) return;
+    const authRequired = Boolean(status.auth?.required);
+    if (authRequired && this.auth.state === 'off') return; // sign-in still starting
+    this.memory.configure({
+      store: status.memory?.store || 'browser',
+      authRequired,
+      user: this.auth.signedIn ? this.auth.user : null,
+    });
+  }
+
+  exportMemories() {
+    const date = new Date().toISOString().slice(0, 10);
+    downloadFile(`drone-hive-ai-memories-${date}.json`, this.memory.exportJSON());
+    toast('Memories downloaded', { type: 'success' });
   }
 
   async signOut() {
@@ -325,6 +357,25 @@ export class App {
     if (conv.messages.at(-1)?.role === 'user') this.#requestReply(conv.id);
   }
 
+  /** Replaces the last user message with an edited version and asks again. */
+  editAndResend(msgId, text) {
+    if (this.sending) return false;
+    const conv = this.store.active;
+    const msg = conv?.messages.find((m) => m.id === msgId);
+    const content = String(text || '').replace(/\s+$/, '');
+    if (!msg || msg.role !== 'user' || (!content.trim() && !msg.attachments?.length)) return false;
+    if (content.length > LIMITS.maxMessageChars) {
+      toast(`Messages can be up to ${LIMITS.maxMessageChars.toLocaleString()} characters.`, { type: 'error' });
+      return false;
+    }
+    const attachments = msg.attachments || [];
+    this.store.truncateFrom(conv.id, msgId);
+    this.store.addMessage(conv.id, { role: 'user', content, attachments });
+    this.chat.scrollToBottom(false);
+    this.#requestReply(conv.id);
+    return true;
+  }
+
   retry(noticeId) {
     if (this.sending) return;
     const conv = this.store.active;
@@ -363,6 +414,12 @@ export class App {
           maxTokens: s.maxTokens ?? undefined,
           customInstructions: s.customInstructions || undefined,
         },
+        memory: this.memory.forRequest({
+          recentTitles: this.store
+            .list()
+            .filter((c) => c.id !== convId && c.messages.some((m) => m.role === 'user'))
+            .map((c) => c.title),
+        }),
         stream: s.streamResponses,
         accessCode: (s.accessCode || '').trim() || undefined,
         authToken: this.auth.required ? (await this.auth.getToken()) || undefined : undefined,
@@ -377,6 +434,13 @@ export class App {
             this.store.updateMessage(convId, placeholder.id, { meta }, { stream: true });
           }
           if (ev.type === 'done' && ev.quota) this.quota = ev.quota;
+          if (ev.type === 'memory') {
+            const summary = this.memory.applyChatEvent(ev);
+            if (summary && (summary.applied.length || summary.rejected.length || summary.error)) {
+              meta = { ...meta, memory: summary };
+              this.store.updateMessage(convId, placeholder.id, { meta }, { stream: true });
+            }
+          }
           if (ev.type === 'delta') {
             content += ev.text;
             this.store.updateMessage(convId, placeholder.id, { content, meta }, { stream: true });

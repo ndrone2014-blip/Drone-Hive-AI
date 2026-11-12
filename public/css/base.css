@@ -38,6 +38,47 @@ code, kbd, pre { font-family: var(--font-mono); }
 /* Logo artwork is black ink on transparent; flip it in dark mode */
 :root[data-theme='dark'] .logo-ink { filter: invert(1) brightness(0.96); }
 
+/* ── Logo tile ───────────────────────────────────────────────
+   The Drone Hive Studios emblem in a small rounded tile. One component used
+   everywhere (sidebar, header, AI messages, loading and sign-in screens), so
+   the logo always has the same proportions and never stretches. */
+.logo-tile {
+  --tile: 32px;
+  position: relative; flex: 0 0 var(--tile); width: var(--tile); height: var(--tile);
+  display: inline-grid; place-items: center;
+  border-radius: calc(var(--tile) * 0.3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm), inset 0 -1px 0 rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+}
+.logo-tile::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04); pointer-events: none; }
+.logo-tile img { width: 70%; height: 70%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+.logo-tile-sm { --tile: 24px; }
+.logo-tile-md { --tile: 36px; }
+.logo-tile-lg { --tile: 56px; }
+.logo-tile-xl { --tile: 76px; }
+:root[data-theme='dark'] .logo-tile { background: var(--surface-2); }
+
+/* ── Loading screen (shown until the app has started) ───────── */
+.boot {
+  position: fixed; inset: 0; z-index: 200;
+  display: grid; place-items: center; align-content: center; gap: 14px;
+  background: var(--bg) var(--hex-pattern);
+  transition: opacity 260ms var(--ease), visibility 0s linear 260ms;
+}
+.boot.done { opacity: 0; visibility: hidden; pointer-events: none; }
+.boot .logo-tile { animation: boot-in 420ms var(--ease) both; box-shadow: var(--shadow); }
+.boot-name { font-family: var(--font-display); font-weight: 800; font-size: 1.1rem; letter-spacing: -0.01em; color: var(--text); animation: boot-in 420ms 60ms var(--ease) both; }
+.boot-name b { color: var(--gold); }
+.boot-bar { position: relative; width: 120px; height: 3px; border-radius: 3px; overflow: hidden; background: var(--surface-3); animation: boot-in 420ms 120ms var(--ease) both; }
+.boot-bar::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; border-radius: inherit; background: var(--gold); animation: boot-slide 1.1s var(--ease) infinite; }
+@keyframes boot-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@keyframes boot-slide { from { left: -40%; } to { left: 100%; } }
+
+/* Small loading spinner */
+.spinner { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--gold); animation: spin 800ms linear infinite; flex-shrink: 0; }
+
 .icon { flex-shrink: 0; display: block; }
 .muted { color: var(--text-3); }
 

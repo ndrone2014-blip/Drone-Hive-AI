@@ -10,7 +10,7 @@
  *  - Never touches /api/* (AI requests, status) or anything not GET.
  *  - Never caches other websites (e.g. Google sign-in).
  */
-const CACHE = 'dhai-shell-v2';
+const CACHE = 'dhai-shell-v3';
 const SHELL = [
   '/',
   '/index.html',

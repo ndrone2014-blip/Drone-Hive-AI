@@ -4,6 +4,10 @@ import { normalizeMessages, countImages, IMAGE_TOKEN_ESTIMATE } from './messages
 import { AIError, ERROR_CODES } from './errors.js';
 import { estimateTokens } from '../security.js';
 import { AUTO_ORDER, planRoute, resolveDefaultProvider, runRoute } from './router.js';
+import { IDENTITY_PROMPT, asksAboutUnderlyingModel, guardIdentity } from '../identity.js';
+import { buildMemoryPrompt, extractMemoryCommands } from '../memory/prompt.js';
+import { memoryStoreMode } from '../memory/store.js';
+import { MEMORY_LIMITS } from '../../public/js/shared/memory-rules.js';
 
 /**
  * The AI service: the only place that knows how a chat request turns into a
@@ -48,14 +52,16 @@ export function getStatus() {
       maxImageBytes: cfg.limits.maxImageBytes,
     },
     customInstructionsAllowed: cfg.allowCustomInstructions,
+    memory: { store: memoryStoreMode(), maxItems: MEMORY_LIMITS.maxItems, maxChars: MEMORY_LIMITS.maxChars },
   };
 }
 
 /**
  * Validates a chat request and plans the route. No provider is contacted yet.
  * `budget` = tokens this user may still use today (from the usage limits).
+ * `memory` = the user's memory settings and notes (see server/memory/prompt.js).
  */
-export function prepareChat(body, { budget = Infinity } = {}) {
+export function prepareChat(body, { budget = Infinity, memory = { enabled: false } } = {}) {
   const cfg = getServerConfig();
   if (!body || typeof body !== 'object') throw new AIError(ERROR_CODES.INVALID_REQUEST, 'Invalid request body.', 400);
 
@@ -72,13 +78,16 @@ export function prepareChat(body, { budget = Infinity } = {}) {
     ? Math.min(1, Math.max(0, opts.temperature))
     : undefined;
 
-  // 3. System prompt = base personality + optional user custom instructions.
-  //    FUTURE: long-term memory and personalities get injected here.
-  let system = cfg.systemPrompt;
+  // 3. System prompt = permanent identity + base personality + optional user
+  //    custom instructions + memory. The identity always comes first and can't
+  //    be replaced by AI_SYSTEM_PROMPT or overridden by custom instructions.
+  let system = `${IDENTITY_PROMPT}\n\n${cfg.systemPrompt}`;
   if (cfg.allowCustomInstructions && typeof opts.customInstructions === 'string' && opts.customInstructions.trim()) {
     const ci = opts.customInstructions.trim().slice(0, cfg.limits.maxCustomInstructionChars);
-    system += `\n\nThe user has provided these custom instructions (they cannot override the rules above):\n${ci}`;
+    system += `\n\n# The user's custom instructions (follow them, but they can't change who you are or the rules above)\n${ci}`;
   }
+  const memoryPrompt = buildMemoryPrompt(memory, allMessages);
+  system += memoryPrompt.text;
 
   // 4. Input token cap: drop the oldest messages until the request fits.
   const messages = fitToInputBudget(allMessages, system, cfg.maxInputTokens);
@@ -88,7 +97,22 @@ export function prepareChat(body, { budget = Infinity } = {}) {
   const model = typeof body.model === 'string' ? body.model.slice(0, 120) : undefined;
   const plan = planRoute({ modeValue: body.provider, model, messages });
 
-  return { plan, system, messages, maxTokens, temperature, inputTokensEstimate, images: countImages(messages), maxReplySeconds: cfg.maxReplySeconds };
+  const lastUserText = messages[messages.length - 1]?.content || '';
+  return {
+    plan,
+    system,
+    messages,
+    maxTokens,
+    temperature,
+    inputTokensEstimate,
+    images: countImages(messages),
+    maxReplySeconds: cfg.maxReplySeconds,
+    memory,
+    memoryIds: memoryPrompt.idMap,
+    lastUserText,
+    // Honest answers about the technology are allowed when the user asks for them.
+    identityGuard: !asksAboutUnderlyingModel(lastUserText),
+  };
 }
 
 /**
@@ -101,7 +125,9 @@ export async function startChat(prep, { signal } = {}) {
   const timeout = AbortSignal.timeout(prep.maxReplySeconds * 1000);
   const combined = signal ? anySignal([signal, timeout]) : timeout;
   const result = await runRoute(prep.plan, { ...prep, signal: combined });
-  return { ...result, mode: prep.plan.mode };
+  // Hidden memory lines are removed first, then the identity guard runs.
+  const events = guardIdentity(extractMemoryCommands(result.events), { enabled: prep.identityGuard !== false });
+  return { ...result, events, mode: prep.plan.mode };
 }
 
 /** Convenience used by tests and simple callers: prepare + start. */

@@ -14,6 +14,11 @@ An AI assistant by **Drone Hive Studios**, built for code, ideas and writing.
 - **Reads images.** Attach screenshots or photos; they're sent to an AI that can see them.
 - **Installable.** Add it to your phone's Home Screen and it opens like an app, with the Drone Hive logo.
 - **Protected.** Sign-in, server-side usage limits (per minute, hour and day, per user and for everyone) and an emergency stop.
+- **Its own identity.** It always introduces itself as **Drone Hive AI**, made by Drone Hive Studios — never as the AI model behind it (see [Identity](#-identity-always-drone-hive-ai)).
+- **Remembers what matters.** An optional memory remembers your name, projects, tools and preferences between conversations, and you can view, edit or delete everything (see [Memory](#-memory)).
+- **Chat-only.** A text chat app by design — no microphone, speech or audio features.
+
+Official contact: **[drone.hive.studios@gmail.com](mailto:drone.hive.studios@gmail.com)** (also in the app under **Settings → About & Contact**).
 
 > Developed by Drone Hive Studios | Developer @ndrone40
 
@@ -33,7 +38,7 @@ How it stays safe and honest:
 
 - Only **one** provider works on a message at a time. A message is only passed to the next provider if the previous one failed **before writing anything**, so you never get two answers and credits aren't spent twice.
 - Providers that just failed (rate limited, down, bad key) are put on a short cooldown and tried last.
-- Each reply shows a small chip with the provider that **actually** answered (✨ = picked automatically, ↻ = the first choice was busy). Provider errors and API keys are never shown.
+- The provider behind each reply stays in the background. To see which one **actually** answered, turn on **Settings → AI Configuration → Show which AI answered** (✨ = picked automatically, ↻ = the first choice was busy). Provider errors and API keys are never shown.
 
 ## 🖼️ Images
 
@@ -53,6 +58,39 @@ Which providers can read images (checked November 2026, all on free tiers):
 | Ollama Cloud | `qwen3-vl:235b` | Change with `OLLAMA_VISION_MODELS`. |
 
 If you pick a provider that can't read images, the image button explains why and suggests Automatic. If **no** connected provider can read images, uploads stay switched off.
+
+## 🪪 Identity: always Drone Hive AI
+
+Drone Hive AI is the product name, permanently. Whichever AI model writes a reply (Gemini, a free OpenRouter model such as Liquid's LFM, Groq, Ollama…), it answers as **Drone Hive AI, made by Drone Hive Studios**.
+
+How it's enforced (`server/identity.js`):
+
+1. **A locked identity section** is placed *first* in every request to the AI. It isn't part of `AI_SYSTEM_PROMPT`, so replacing the personality can't remove it, and users' custom instructions come after it and can't change it.
+2. **A safety net for small models** that ignore instructions: if a reply starts with "I'm LFM2, a large language model trained by Liquid AI", the server rewrites that self-introduction to "I'm Drone Hive AI, an AI assistant built by Drone Hive Studios" while it streams. Only first-person self-introductions are touched — never code blocks or normal text about other AIs ("how do I call the Gemini API?").
+3. **Honest when asked directly.** If someone specifically asks which underlying model or provider powers a reply, the AI is given a private note with the real provider and model for that reply, and the safety net steps aside so it can answer truthfully.
+
+The AI also knows the official contact address and that it can't send emails itself, so it never claims to have sent one.
+
+## 🧠 Memory
+
+Drone Hive AI can remember useful things between conversations — your name, role, preferences, communication style, ongoing projects, languages and frameworks, and instructions you want followed.
+
+- **Learns as you chat.** When you share something worth keeping, the reply shows a small **Memory updated** chip (tap it to see what was saved). You can also say *"remember …"* or *"forget …"*.
+- **Only what's relevant is used.** Facts about you and your preferences are always available; project and tool notes are only sent when they relate to what you're asking. It never pretends to remember things that weren't saved.
+- **You're in control:** **Settings → Memory** has an on/off switch, *Save automatically* (off = only when you say "remember …"), *Reference recent chats*, and a list where you can add, edit, delete, search, download or clear memories.
+- **Secrets are never saved.** Passwords, API keys, tokens, private keys, card numbers and ID numbers are refused — in the browser *and* on the server, whatever the AI writes.
+- Up to 100 memories of 400 characters each; at most ~40 relevant ones are sent with a message.
+
+### Where memories are stored
+
+| Setup | Where memories live | Works across devices? |
+|---|---|---|
+| **Sign-in + Firestore** (both set up below) | Your Firestore database, one private document per account at `memories/{hash of the account id}`. Managed through `/api/memory`. | ✅ Yes |
+| Anything else | This browser's storage, in a **separate list for each signed-in account** (or one list when sign-in is off). | No — this browser only |
+
+Account storage turns on automatically once [sign-in](#-accounts-sign-in-with-google-or-email) and [Firestore](#turn-on-shared-usage-limits-recommended-free) are both set up — no extra variables. Memories saved in a browser before that can be copied to the account from **Settings → Memory**. Each memory change is one small Firestore read and write (well inside the free plan). Force browser storage with `MEMORY_STORE=browser`.
+
+The memory list is only ever read for the signed-in account the server verified, so one account can never read or change another's — even with a modified browser.
 
 ## 📱 Add to Home Screen
 
@@ -246,7 +284,7 @@ Out of the box, usage counters live in memory on each Netlify edge server, so th
    ```
 5. **Deploys → Trigger deploy.** Then delete the downloaded JSON file.
 
-Each message uses about 6 tiny Firestore writes; the free plan allows 20,000 writes a day (~3,000 messages). Counters are stored under hashed IDs — no emails or IP addresses are saved. Optional: add a TTL policy on the `expireAt` field of the `usage` collection to auto-delete old counters.
+Each message uses about 6 tiny Firestore writes; the free plan allows 20,000 writes a day (~3,000 messages). Counters are stored under hashed IDs — no emails or IP addresses are saved. The same database also holds [account memories](#-memory) (`memories` collection) once sign-in is on. Optional: add a TTL policy on the `expireAt` field of the `usage` collection to auto-delete old counters.
 
 **Admin controls without redeploying:** create the document `config/limits` in Firestore and add any of these fields. They apply within ~30 seconds:
 
@@ -301,11 +339,14 @@ Drone-Hive-AI/
 │       ├── main.js             entry point
 │       ├── app.js              controller: send / stop / regenerate flow
 │       ├── config.js           app info, feature flags, prompts, defaults
+│       ├── shared/
+│       │   └── memory-rules.js memory rules used by browser AND server (never-save checks, relevance)
 │       ├── core/
 │       │   ├── storage.js              storage adapter (localStorage)
 │       │   ├── attachments.js          image shrinking + IndexedDB storage
 │       │   ├── conversation-store.js   conversation management
 │       │   ├── settings-store.js       user preferences
+│       │   ├── memory-store.js         memories (account or browser storage)
 │       │   └── emitter.js
 │       ├── services/
 │       │   ├── ai-client.js    talks to /api/* (never to providers directly)
@@ -320,6 +361,10 @@ Drone-Hive-AI/
 │           └── dom.js          helpers
 ├── server/                     ← backend (shared by Netlify + local server)
 │   ├── config.js               server settings + built-in personality
+│   ├── identity.js             permanent "Drone Hive AI" identity + self-introduction safety net
+│   ├── memory/
+│   │   ├── store.js            account memories in Firestore (per account, hashed id)
+│   │   └── prompt.js           memory in the prompt + hidden "remember" lines in replies
 │   ├── env.js                  reads environment variables
 │   ├── handlers.js             HTTP handlers for /api/status and /api/chat
 │   ├── security.js             origin check, access code, headers
@@ -342,9 +387,10 @@ Drone-Hive-AI/
 │           └── openai-compatible.js
 ├── netlify/edge-functions/     ← Netlify entry points
 │   ├── chat.js                 POST /api/chat
+│   ├── memory.js               /api/memory (account memories)
 │   └── status.js               GET  /api/status
 ├── scripts/dev-server.mjs      local server (no dependencies)
-├── tests/                      backend tests (npm test)
+├── tests/                      automated tests (npm test)
 ├── docs/ARCHITECTURE.md        how to add future features
 ├── docs/SECURITY.md            security review, test checklist, known limits
 ├── netlify.toml
@@ -360,6 +406,7 @@ Drone-Hive-AI/
 |---|---|---|
 | `/api/status` | GET | Connection status, available providers and models (never includes keys) |
 | `/api/chat` | POST | Send a conversation and get a reply. Streams NDJSON by default, or returns JSON with `"stream": false` |
+| `/api/memory` | GET / POST / PATCH / DELETE | The signed-in account's memories (account storage only): list; add `{text, category}` or copy `{import: [...]}`; edit `{id, text?, category?}`; delete `?id=…` or `?all=1`. Needs the sign-in token. |
 
 Request body for `/api/chat`:
 
@@ -372,9 +419,12 @@ Request body for `/api/chat`:
   "provider": "automatic",
   "model": "gemini-flash-latest",
   "options": { "temperature": 0.7, "maxTokens": 2048, "customInstructions": "Be brief." },
+  "memory": { "enabled": true, "auto": true, "items": [{ "id": "…", "text": "Prefers TypeScript", "category": "tech" }], "recent": ["Nexora slash commands"] },
   "stream": true
 }
 ```
+
+`memory.items` is only used with browser storage; with account storage the server loads the account's memories itself and ignores it.
 
 Stream events, one JSON object per line:
 
@@ -385,11 +435,12 @@ Stream events, one JSON object per line:
 {"type":"ping"}                                   (keep-alive while a provider is chosen)
 {"type":"start","provider":{"id":"gemini","name":"Google Gemini","shortName":"Gemini"},"model":"...","mode":"automatic","rerouted":false}
 {"type":"delta","text":"Hel"}
+{"type":"memory","store":"account","saved":true,"applied":[{"op":"add","text":"Prefers TypeScript"}],"items":[...]}   (only when something was remembered)
 {"type":"done","stopReason":"stop","usage":{...},"quota":{"requestsUsed":3,"requestsLimit":100,...}}
 {"type":"error","error":{"code":"...","message":"..."}}
 ```
 
-Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `INVALID_IMAGE`, `VISION_UNSUPPORTED`, `UNAUTHORIZED`, `AUTH_REQUIRED`, `AUTH_EXPIRED`, `EMAIL_NOT_VERIFIED`, `FORBIDDEN`, `INPUT_TOO_LARGE`, `RATE_LIMITED`, `USAGE_LIMIT`, `GLOBAL_LIMIT`, `SERVICE_PAUSED`, `DUPLICATE_REQUEST`, `PROVIDER_AUTH`, `MODEL_NOT_FOUND`, `PROVIDER_BAD_REQUEST`, `PROVIDER_UNAVAILABLE`, `PROVIDER_ERROR`, `ALL_PROVIDERS_FAILED`. Limit errors include `resetAt` (ISO time).
+Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `INVALID_IMAGE`, `VISION_UNSUPPORTED`, `UNAUTHORIZED`, `AUTH_REQUIRED`, `AUTH_EXPIRED`, `EMAIL_NOT_VERIFIED`, `FORBIDDEN`, `INPUT_TOO_LARGE`, `RATE_LIMITED`, `USAGE_LIMIT`, `GLOBAL_LIMIT`, `SERVICE_PAUSED`, `DUPLICATE_REQUEST`, `PROVIDER_AUTH`, `MODEL_NOT_FOUND`, `PROVIDER_BAD_REQUEST`, `PROVIDER_UNAVAILABLE`, `PROVIDER_ERROR`, `ALL_PROVIDERS_FAILED`, `MEMORY_IN_BROWSER`, `MEMORY_UNAVAILABLE`, `MEMORY_REJECTED`. Limit errors include `resetAt` (ISO time).
 
 ---
 
@@ -397,6 +448,8 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `INVALID_IMAGE`, `VIS
 
 **Branding & design**
 - Drone Hive Studios branding throughout: logo, emblem, wordmark, favicon and social banner
+- The Drone Hive emblem in a small rounded tile beside the name in the sidebar and header, on every AI reply, on the loading screen and on the sign-in screen
+- Official contact (drone.hive.studios@gmail.com) in **Settings → About & Contact** and on the sign-in screen, with "Email us" and "Copy address" buttons
 - Colors taken from the brand: ink black, warm off-white and honey gold, plus a subtle honeycomb pattern
 - Light, dark and system themes, three text sizes and a reduce-motion option
 - Responsive layout: desktop sidebar, plus a drawer on narrow screens and phones
@@ -409,6 +462,7 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `INVALID_IMAGE`, `VIS
 **Chat**
 - Welcome screen with greeting, description and four suggested-prompt cards that fill in the message box
 - User and AI message bubbles, timestamps, copy message, copy code blocks and regenerate the last reply
+- Edit your last message in place and resend it (Ctrl/⌘ + Enter or the Send button; Esc cancels)
 - Markdown in replies: code blocks, lists, tables, links, quotes and headings, rendered safely (HTML is escaped)
 - Live streaming with a typing indicator and caret, stop button (or Esc), smooth auto-scroll and a "jump to latest" button
 - Clear notices when the AI isn't connected or the server can't be reached, with "AI settings" and "Try again" buttons
@@ -431,6 +485,11 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `INVALID_IMAGE`, `VIS
 - Export all chats as JSON, delete individual chats, clear all history and reset settings
 - Storage usage stats, plus a warning if browser storage is full
 
+**Identity & memory**
+- Permanent "Drone Hive AI by Drone Hive Studios" identity, with a streaming safety net for models that introduce themselves by their own name, and honest answers when someone asks what powers it
+- Memory: learns useful facts as you chat, "Memory updated" chips, Settings → Memory to view, add, edit, search, delete, download or clear, plus on/off, automatic-saving and recent-chats switches
+- Memories stored per account (Firestore) or per account in the browser; secrets refused on both sides
+
 **AI backend**
 - Dedicated AI service, separate from the frontend
 - Provider registry with Google Gemini, OpenRouter, Groq, Ollama (cloud or local), Anthropic Claude and any OpenAI-compatible API
@@ -442,22 +501,22 @@ Error codes: `PROVIDER_NOT_CONFIGURED`, `INVALID_REQUEST`, `INVALID_IMAGE`, `VIS
 - Rate limits (minute/hour/day), daily token budgets, a global daily cap, an emergency stop and per-request caps — shared through Firestore when configured
 - Connection status endpoint and status pill
 - Sign in with Google or email + password (Firebase, free), checked on the server for every chat
-- 53 automated backend tests (routing, fallback, limits, images, sign-in, secret scanning)
+- 75 automated tests (routing, fallback, limits, images, sign-in, secret scanning, identity, memory and account isolation)
 
 ## 🔜 Left for future development
 
 The architecture is ready for these (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
 
-- Long-term AI memory
 - PDF and document understanding (images are done)
 - Web search and tool use
 - Advanced code assistance (running code, project context)
 - Conversation folders
-- Voice input and voice responses
 - Custom AI personalities
 - Multiple models side by side
 - Cross-device conversation sync (accounts are done; chats are still saved per browser)
 - Importing exported conversations
+
+Drone Hive AI is a **text chat app by design**, so voice input and spoken replies are intentionally not planned.
 
 ---
 

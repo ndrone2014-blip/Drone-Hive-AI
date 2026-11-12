@@ -4,20 +4,31 @@
 export const APP = {
   name: 'Drone Hive AI',
   shortName: 'Drone Hive',
-  version: '0.2.0',
+  version: '0.3.0',
   studio: 'Drone Hive Studios',
   credits: 'Developed by Drone Hive Studios | Developer @ndrone40',
+  // Official company contact. Shown in Settings → About & contact. Links open
+  // the user's own email app — Drone Hive AI never sends email itself.
+  email: 'drone.hive.studios@gmail.com',
 };
+
+/** mailto: link to Drone Hive Studios with a helpful subject line. */
+export function contactLink(subject = 'Drone Hive AI') {
+  return `mailto:${APP.email}?subject=${encodeURIComponent(subject)}`;
+}
 
 export const API = {
   status: '/api/status',
   chat: '/api/chat',
+  memory: '/api/memory',
 };
 
 export const STORAGE_KEYS = {
   conversations: 'dhai.conversations.v1',
   activeId: 'dhai.activeConversation.v1',
   settings: 'dhai.settings.v1',
+  // + '.<account id>' (or '.guest'): memories kept in this browser, one list per account
+  memory: 'dhai.memory.v1',
 };
 
 export const LIMITS = {
@@ -35,7 +46,8 @@ export const FEATURES = {
   imageUnderstanding: true,
   pdfUnderstanding: false,
   webSearch: false,
-  longTermMemory: false,
+  longTermMemory: true, // Settings → Memory (account or browser storage, see core/memory-store.js)
+  // Drone Hive AI is a text-only chat app: no microphone, speech or audio features.
   voiceInput: false,
   voiceResponses: false,
   folders: false,
@@ -90,6 +102,11 @@ export const DEFAULT_SETTINGS = {
   maxTokens: null, // null = server default
   customInstructions: '',
   accessCode: '',
+  showProviderChip: false, // technical: label each reply with the AI provider/model that wrote it
+  // Memory
+  memoryEnabled: true, // remember useful things between conversations
+  memoryAuto: true, // save automatically (off = only when asked to "remember …")
+  memoryRecentChats: true, // let the AI see the titles of recent conversations
 };
 
 /** Labels for the AI mode picker. */

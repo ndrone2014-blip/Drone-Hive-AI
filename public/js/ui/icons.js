@@ -45,6 +45,11 @@ const PATHS = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h10"/>',
   gauge: '<path d="M12 14l3.5-3.5"/><path d="M4.9 19a9 9 0 1 1 14.2 0"/>',
+  // Brain outline (adapted from the ISC-licensed Lucide icon set)
+  brain:
+    '<path d="M12 5a3 3 0 1 0-6 .1 4 4 0 0 0-2.5 5.8 4 4 0 0 0 .5 6.6A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 6 .1 4 4 0 0 1 2.5 5.8 4 4 0 0 1-.5 6.6A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M12 5v13"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/>',
+  plusCircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
 };
 
 export function icon(name, { size = 18, className = '', strokeWidth = 1.8 } = {}) {
