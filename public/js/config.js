@@ -4,7 +4,7 @@
 export const APP = {
   name: 'Drone Hive AI',
   shortName: 'Drone Hive',
-  version: '0.1.0',
+  version: '0.2.0',
   studio: 'Drone Hive Studios',
   credits: 'Developed by Drone Hive Studios | Developer @ndrone40',
 };
@@ -21,8 +21,9 @@ export const STORAGE_KEYS = {
 };
 
 export const LIMITS = {
-  maxMessageChars: 32000,
+  maxMessageChars: 16000, // matches the server default (AI_MAX_MESSAGE_CHARS)
   titleLength: 48,
+  maxImagesPerMessage: 4,
 };
 
 /**
@@ -30,8 +31,8 @@ export const LIMITS = {
  * The UI reads these to show "coming soon" states instead of dead buttons.
  */
 export const FEATURES = {
-  fileUploads: false, // FUTURE: attachments in composer -> content parts
-  imageUnderstanding: false,
+  fileUploads: true, // images only; turned on/off at runtime by /api/status (status.vision)
+  imageUnderstanding: true,
   pdfUnderstanding: false,
   webSearch: false,
   longTermMemory: false,
@@ -79,14 +80,20 @@ export const DEFAULT_SETTINGS = {
   sidebarCollapsed: false,
   displayName: '',
   // Chat
-  enterToSend: true,
+  enterToSend: true, // on phones Enter always adds a new line; use the send button
   autoScroll: true,
   // AI
-  provider: 'auto',
+  provider: 'default', // 'default' | 'automatic' | a provider id (manual choice)
   model: '',
   streamResponses: true,
   temperature: null, // null = provider default
   maxTokens: null, // null = server default
   customInstructions: '',
   accessCode: '',
+};
+
+/** Labels for the AI mode picker. */
+export const AI_MODES = {
+  default: { label: 'Default', description: 'Drone Hive AI’s standard setup' },
+  automatic: { label: 'Automatic', description: 'Picks the best AI for each message' },
 };

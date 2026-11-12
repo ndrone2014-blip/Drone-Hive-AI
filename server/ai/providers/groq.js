@@ -17,11 +17,14 @@ import { openChatCompletions } from './openai-compatible.js';
  */
 const BASE_URL = 'https://api.groq.com/openai/v1';
 const DEFAULT_MODELS = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'openai/gpt-oss-20b'];
+// Vision (image input) models: https://console.groq.com/docs/vision — override with GROQ_VISION_MODELS.
+const DEFAULT_VISION_MODELS = ['qwen/qwen3.8-27b'];
 
 export const groqProvider = {
   id: 'groq',
   name: 'Groq',
-  capabilities: { streaming: true, vision: false, documents: false, tools: false },
+  shortName: 'Groq',
+  capabilities: { streaming: true, vision: true, documents: false, tools: false },
 
   getConfig() {
     const apiKey = getEnv('GROQ_API_KEY');
@@ -33,12 +36,16 @@ export const groqProvider = {
       baseUrl: BASE_URL,
       models: [...new Set([defaultModel, ...listed])],
       defaultModel,
+      visionModels: getEnvList('GROQ_VISION_MODELS') || DEFAULT_VISION_MODELS,
+      maxImages: 3, // Groq's per-request image limit
     };
   },
 
   async open({ model, system, messages, maxTokens, temperature, signal }) {
     const cfg = this.getConfig();
     if (!cfg.configured) throw new AIError(ERROR_CODES.PROVIDER_NOT_CONFIGURED, 'Groq API key is not set (GROQ_API_KEY).', 503);
-    return openChatCompletions({ ...cfg, providerName: this.name, model, system, messages, maxTokens, temperature, signal });
+    // Qwen models on Groq can include their private "thinking" text; hide it.
+    const extraBody = /^qwen\//i.test(model) ? { reasoning_format: 'hidden' } : undefined;
+    return openChatCompletions({ ...cfg, providerName: this.name, model, system, messages, maxTokens, temperature, signal, extraBody, includeUsage: true });
   },
 };

@@ -1,8 +1,9 @@
 import { $, escapeHtml, formatDateTime, copyText } from './dom.js';
 import { icon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
-import { toast } from './overlays.js';
+import { toast, showImage } from './overlays.js';
 import { SUGGESTED_PROMPTS } from '../config.js';
+import { attachmentUrl } from '../core/attachments.js';
 
 const NEAR_BOTTOM = 140;
 
@@ -49,6 +50,7 @@ export class ChatView {
     this.content.innerHTML = `<div class="messages">${conv.messages.map((m, i) => this.#messageHTML(m, i === this.#lastAssistantIndex(conv), i === conv.messages.length - 1)).join('')}</div>`;
     this.renderedId = conv.id;
     conv.messages.forEach((m) => this.seen.add(m.id));
+    this.#hydrateImages();
     if (switched) {
       this.stickToBottom = true;
       this.scrollToBottom(false);
@@ -71,7 +73,10 @@ export class ChatView {
       const bubble = el.querySelector('.bubble-ai');
       if (bubble) bubble.innerHTML = this.#aiContentHTML(msg);
       const head = el.querySelector('.ai-head');
-      if (head && msg.meta?.model && !head.querySelector('.msg-model')) head.insertAdjacentHTML('beforeend', `<span class="msg-model">${escapeHtml(msg.meta.model)}</span>`);
+      if (head) {
+        const next = this.#headHTML(msg);
+        if (head.innerHTML !== next) head.innerHTML = next;
+      }
       if (this.stickToBottom && this.settings.get('autoScroll')) this.scrollToBottom(false);
     });
   }
@@ -118,8 +123,19 @@ export class ChatView {
     const time = this.settings.get('showTimestamps') ? `<time datetime="${new Date(m.createdAt).toISOString()}">${formatDateTime(m.createdAt)}</time>` : '';
 
     if (m.role === 'user') {
+      const atts = (m.attachments || []).filter((a) => a.kind === 'image');
+      const images = atts.length
+        ? `<div class="msg-images count-${Math.min(atts.length, 4)}">${atts
+            .map(
+              (a) => `<button type="button" class="msg-image" data-action="view-image" data-att="${escapeHtml(a.id)}" aria-label="View image ${escapeHtml(a.name || '')}" data-ratio="${Number(a.width) || 4}/${Number(a.height) || 3}">
+                <img data-att="${escapeHtml(a.id)}" alt="${escapeHtml(a.name || 'Attached image')}" width="${Number(a.width) || ''}" height="${Number(a.height) || ''}">
+              </button>`,
+            )
+            .join('')}</div>`
+        : '';
       return `<article class="msg msg-user${enter}" data-msg="${m.id}">
-        <div class="bubble bubble-user">${escapeHtml(m.content)}</div>
+        ${images}
+        ${m.content ? `<div class="bubble bubble-user">${escapeHtml(m.content)}</div>` : ''}
         <div class="msg-actions">
           ${time}
           <button type="button" class="act" data-action="copy" title="Copy message" aria-label="Copy message">${icon('copy', { size: 15 })}</button>
@@ -132,13 +148,10 @@ export class ChatView {
     // assistant
     const streaming = m.status === 'streaming';
     const body = this.#aiContentHTML(m);
-    const tag =
-      m.status === 'stopped' ? '<span class="msg-tag">Stopped</span>' : m.status === 'interrupted' ? '<span class="msg-tag">Interrupted</span>' : '';
-    const model = m.meta?.model ? `<span class="msg-model">${escapeHtml(m.meta.model)}</span>` : '';
     return `<article class="msg msg-ai${streaming ? ' is-streaming' : ''}${enter}" data-msg="${m.id}">
       <div class="ai-avatar" aria-hidden="true"><img class="logo-ink" src="/assets/brand/emblem.png" alt="" width="18" height="18"></div>
       <div class="ai-body">
-        <div class="ai-head"><span class="ai-name">Drone Hive AI</span>${model}${tag}</div>
+        <div class="ai-head">${this.#headHTML(m)}</div>
         <div class="bubble bubble-ai">${body}</div>
         ${streaming ? '' : `<div class="msg-actions">
           ${time}
@@ -147,6 +160,25 @@ export class ChatView {
         </div>`}
       </div>
     </article>`;
+  }
+
+  /** Name + a small, honest "answered by" chip (only once a provider has actually answered). */
+  #headHTML(m) {
+    const tag =
+      m.status === 'stopped' ? '<span class="msg-tag">Stopped</span>' : m.status === 'interrupted' ? '<span class="msg-tag">Interrupted</span>' : '';
+    const meta = m.meta || {};
+    let chip = '';
+    if (meta.providerName || meta.model) {
+      const name = meta.providerName || meta.model;
+      const tip = [
+        meta.providerName ? `Answered by ${meta.providerName}` : '',
+        meta.model ? `Model: ${meta.model}` : '',
+        meta.mode === 'automatic' ? 'Picked automatically' : '',
+        meta.rerouted ? 'The first-choice AI was busy, so another one answered' : '',
+      ].filter(Boolean).join(' · ');
+      chip = `<span class="msg-provider" title="${escapeHtml(tip)}">${meta.mode === 'automatic' ? icon('sparkle', { size: 12 }) : ''}<span>${escapeHtml(name)}</span>${meta.rerouted ? '<i aria-hidden="true">↻</i>' : ''}</span>`;
+    }
+    return `<span class="ai-name">Drone Hive AI</span>${chip}${tag}`;
   }
 
   #aiContentHTML(m) {
@@ -160,22 +192,35 @@ export class ChatView {
       }
       return `<div class="md">${body}</div>`;
     }
-    if (streaming) return '<div class="thinking" aria-label="Drone Hive AI is responding"><span></span><span></span><span></span></div>';
+    if (streaming) {
+      const label = m.meta?.routing === 'automatic' ? 'Choosing the best AI…' : m.meta?.providerName ? 'Writing…' : 'Thinking…';
+      return `<div class="thinking" role="status"><span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="thinking-label">${label}</span></div>`;
+    }
     return '';
   }
 
   #noticeHTML(m, time, isLast, enter = '') {
     const v = m.variant || 'error';
-    const ico = v === 'disconnected' ? 'plug' : v === 'auth' ? 'user' : 'alert';
-    const title = v === 'disconnected' ? 'AI provider not connected' : v === 'offline' ? 'Server not reachable' : v === 'auth' ? 'Sign in required' : 'Something went wrong';
+    const ico = v === 'disconnected' ? 'plug' : v === 'auth' ? 'user' : v === 'limit' ? 'gauge' : v === 'image' ? 'image' : 'alert';
+    const titles = {
+      disconnected: 'AI provider not connected',
+      offline: 'Server not reachable',
+      auth: 'Sign in required',
+      limit: m.meta?.code === 'GLOBAL_LIMIT' ? 'Daily capacity reached' : m.meta?.code === 'SERVICE_PAUSED' ? 'Temporarily paused' : 'Usage limit reached',
+      busy: 'AI providers are busy',
+      image: 'Image couldn’t be sent',
+    };
+    const title = titles[v] || 'Something went wrong';
+    const canRetry = isLast && v !== 'limit';
     return `<article class="msg msg-notice notice-${v}${enter}" data-msg="${m.id}" role="status">
       <div class="notice-icon">${icon(ico, { size: 18 })}</div>
       <div class="notice-body">
         <div class="notice-title">${title}</div>
         <p>${escapeHtml(m.content)}</p>
         <div class="notice-actions">
-          ${(v !== 'error' && v !== 'auth') || /access code/i.test(m.content) ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-ai-settings">${icon('settings', { size: 14 })}<span>AI settings</span></button>` : ''}
-          ${isLast ? `<button type="button" class="btn btn-sm btn-ghost" data-action="retry">${icon('refresh', { size: 14 })}<span>Try again</span></button>` : ''}
+          ${['disconnected', 'offline'].includes(v) || /access code/i.test(m.content) ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-ai-settings">${icon('settings', { size: 14 })}<span>AI settings</span></button>` : ''}
+          ${v === 'image' ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-model-picker">${icon('sparkle', { size: 14 })}<span>Change AI</span></button>` : ''}
+          ${canRetry ? `<button type="button" class="btn btn-sm btn-ghost" data-action="retry">${icon('refresh', { size: 14 })}<span>Try again</span></button>` : ''}
           ${time}
         </div>
       </div>
@@ -192,6 +237,12 @@ export class ChatView {
 
     if (action === 'prompt') return this.actions.usePrompt(SUGGESTED_PROMPTS[Number(btn.dataset.i)].prompt);
     if (action === 'open-ai-settings') return this.actions.openSettings('ai');
+    if (action === 'open-model-picker') return this.actions.openModelPicker?.();
+    if (action === 'view-image') {
+      const img = btn.querySelector('img');
+      if (img?.src) showImage(img.src, img.alt);
+      return;
+    }
     if (action === 'regenerate') return this.actions.regenerate(msgId);
     if (action === 'retry') return this.actions.retry(msgId);
     if (action === 'copy') {
@@ -203,6 +254,24 @@ export class ChatView {
       const code = btn.closest('.code-block')?.querySelector('code')?.textContent || '';
       if (await copyText(code)) this.#flash(btn, true);
     }
+  }
+
+  /** Loads stored images into <img> tags (object URLs from IndexedDB). */
+  async #hydrateImages() {
+    // (Set through the DOM: the Content-Security-Policy forbids inline style attributes.)
+    this.content.querySelectorAll('.msg-image[data-ratio]').forEach((el) => {
+      el.style.aspectRatio = el.dataset.ratio.replace('/', ' / ');
+      el.removeAttribute('data-ratio');
+    });
+    const imgs = [...this.content.querySelectorAll('img[data-att]:not([src])')];
+    await Promise.all(
+      imgs.map(async (img) => {
+        const url = await attachmentUrl(img.dataset.att);
+        if (!img.isConnected) return;
+        if (url) img.src = url;
+        else img.closest('.msg-image')?.classList.add('is-missing');
+      }),
+    );
   }
 
   #flash(btn, withLabel = false) {

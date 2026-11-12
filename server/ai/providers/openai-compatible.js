@@ -1,6 +1,11 @@
 import { getEnv, getEnvList } from '../../env.js';
-import { errorFromProviderResponse, AIError, ERROR_CODES } from '../errors.js';
+import { errorFromProviderResponse, streamError, AIError, ERROR_CODES } from '../errors.js';
 import { parseSSE } from '../sse.js';
+
+/** True when a URL is Google's Gemini OpenAI-compatible endpoint. */
+export function isGeminiCompatUrl(url) {
+  return /^https:\/\/generativelanguage\.googleapis\.com\//i.test(String(url || ''));
+}
 
 /**
  * Generic "OpenAI-compatible" provider (the /chat/completions format).
@@ -15,6 +20,9 @@ export const openAICompatibleProvider = {
   get name() {
     return getEnv('OPENAI_COMPAT_NAME', 'OpenAI-compatible');
   },
+  get shortName() {
+    return this.name;
+  },
   capabilities: { streaming: true, vision: false, documents: false, tools: false },
 
   getConfig() {
@@ -24,11 +32,14 @@ export const openAICompatibleProvider = {
     const defaultModel = getEnv('OPENAI_COMPAT_MODEL', listed[0] || '');
     const models = [...new Set([defaultModel, ...listed].filter(Boolean))];
     return {
-      configured: Boolean(apiKey && baseUrl && defaultModel),
+      // If this slot points at Google's Gemini endpoint, the dedicated Gemini
+      // provider uses these values instead, so it isn't listed twice.
+      configured: Boolean(apiKey && baseUrl && defaultModel) && !isGeminiCompatUrl(baseUrl),
       apiKey,
       baseUrl,
       models,
       defaultModel,
+      visionModels: (getEnvList('OPENAI_COMPAT_VISION_MODELS') || []).filter((m) => models.includes(m)),
     };
   },
 
@@ -43,15 +54,18 @@ export const openAICompatibleProvider = {
 
 /**
  * Shared helper: sends a streaming /chat/completions request and returns the
- * normalized event iterator. Used by every OpenAI-format provider (incl. Ollama).
+ * normalized event iterator. Used by every OpenAI-format provider
+ * (Gemini, Groq, OpenRouter, Ollama, custom).
  */
-export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal, extraHeaders }) {
+export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal, extraHeaders, extraBody, includeUsage = false }) {
   const body = {
+    ...(extraBody || {}),
     model,
-    messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: m.content }))],
+    messages: [{ role: 'system', content: system }, ...messages.map(toOpenAIMessage)],
     max_tokens: maxTokens,
     stream: true,
   };
+  if (includeUsage) body.stream_options = { include_usage: true };
   if (typeof temperature === 'number') body.temperature = temperature;
 
   const headers = { ...(extraHeaders || {}), 'content-type': 'application/json' };
@@ -59,6 +73,18 @@ export async function openChatCompletions({ baseUrl, apiKey, providerName, model
   const res = await fetch(`${baseUrl}/chat/completions`, { method: 'POST', headers, body: JSON.stringify(body), signal });
   if (!res.ok || !res.body) throw await errorFromProviderResponse(res, providerName);
   return streamEvents(res.body, providerName);
+}
+
+/** Text-only messages stay plain strings; messages with images become content parts. */
+export function toOpenAIMessage(m) {
+  if (!m.images?.length) return { role: m.role, content: m.content };
+  return {
+    role: m.role,
+    content: [
+      ...(m.content ? [{ type: 'text', text: m.content }] : []),
+      ...m.images.map((img) => ({ type: 'image_url', image_url: { url: `data:${img.mediaType};base64,${img.data}` } })),
+    ],
+  };
 }
 
 async function* streamEvents(body, providerName) {
@@ -72,9 +98,7 @@ async function* streamEvents(body, providerName) {
     } catch {
       continue;
     }
-    if (json.error) {
-      throw new AIError(ERROR_CODES.PROVIDER_ERROR, `${providerName} error: ${json.error.message || 'stream error'}`, 502);
-    }
+    if (json.error) throw streamError(providerName, json.error.message || JSON.stringify(json.error));
     const choice = json.choices?.[0];
     const text = choice?.delta?.content;
     if (text) yield { type: 'delta', text };

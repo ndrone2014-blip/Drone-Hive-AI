@@ -9,8 +9,24 @@ import { Sidebar } from './ui/sidebar.js';
 import { ChatView } from './ui/chat-view.js';
 import { Composer } from './ui/composer.js';
 import { SettingsModal } from './ui/settings-modal.js';
+import { ModelPicker, modelPillHTML } from './ui/model-picker.js';
 import { $, downloadFile, slugify } from './ui/dom.js';
-import { toast, confirmDialog } from './ui/overlays.js';
+import { toast, confirmDialog, closeMenu } from './ui/overlays.js';
+import { uid } from './core/conversation-store.js';
+import { putAttachment, attachmentBase64, deleteAttachments, clearAttachments, pruneAttachments } from './core/attachments.js';
+import { LIMITS } from './config.js';
+import { initViewport } from './ui/viewport.js';
+
+/** How many recent messages may carry their images to the AI (server also caps this). */
+const IMAGE_HISTORY_MESSAGES = 6;
+
+const formatReset = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return sameDay ? `today at ${time}` : `${d.toLocaleDateString([], { weekday: 'long' })} at ${time}`;
+};
 
 const NOTICE_TEXT = {
   disconnected:
@@ -35,6 +51,10 @@ export class App {
     this.authGate = new AuthGate({ auth: this.auth });
 
     this.sending = null; // { convId, msgId, controller }
+    this.quota = null; // latest usage summary from the server
+    this.pendingWrites = Promise.resolve(); // image saves in progress
+    initViewport();
+    $('#model-pill').innerHTML = modelPillHTML();
 
     this.sidebar = new Sidebar({
       store: this.store,
@@ -58,13 +78,20 @@ export class App {
         regenerate: (msgId) => this.regenerate(msgId),
         retry: (msgId) => this.retry(msgId),
         openSettings: (section) => this.settingsModal.open(section),
+        openModelPicker: () => this.picker.open(),
       },
+    });
+
+    this.picker = new ModelPicker({
+      settings: this.settings,
+      connection: this.connection,
+      actions: { openSettings: (section) => this.settingsModal.open(section) },
     });
 
     this.composer = new Composer({
       settings: this.settings,
       actions: {
-        send: (text) => this.send(text),
+        send: (text, attachments) => this.send(text, attachments),
         stop: () => this.stop(),
       },
     });
@@ -74,6 +101,7 @@ export class App {
       store: this.store,
       connection: this.connection,
       auth: this.auth,
+      getQuota: () => this.quota,
       actions: {
         refreshConnection: () => this.connection.refresh(),
         exportAll: () => this.exportAll(),
@@ -92,6 +120,8 @@ export class App {
     this.#renderStatus();
     this.connection.refresh();
     this.composer.focus();
+    // Tidy up images left behind by a crash or another tab, when the browser is idle.
+    (window.requestIdleCallback || ((fn) => setTimeout(fn, 3000)))(() => pruneAttachments(this.store.attachmentIds()));
   }
 
   // ── store / service wiring ─────────────────────────────
@@ -117,6 +147,10 @@ export class App {
       if (['showTimestamps', '*'].includes(key)) this.chat.render();
       if (['enterToSend', '*'].includes(key)) this.composer.updateHint();
       if (['provider', 'model', '*'].includes(key)) this.#renderStatus();
+      if (key === 'provider') {
+        const label = this.picker.label();
+        toast(this.settings.get('provider') === 'automatic' ? 'Automatic: Drone Hive AI will pick the best AI for each message.' : `Now using: ${label}`, { type: 'success' });
+      }
     });
 
     this.connection.on('change', ({ status }) => {
@@ -147,14 +181,15 @@ export class App {
   }
 
   #bindGlobal() {
-    $('#status-pill').addEventListener('click', () => this.settingsModal.open('ai'));
 
     document.addEventListener('keydown', (e) => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         this.sidebar.focusSearch();
-      } else if (e.key === 'Escape' && this.sending && !this.settingsModal.isOpen && !document.querySelector('.dialog-backdrop, .menu')) {
+      } else if (e.key === 'Escape' && document.documentElement.classList.contains('sidebar-open')) {
+        this.sidebar.closeMobile();
+      } else if (e.key === 'Escape' && this.sending && !this.settingsModal.isOpen && !document.querySelector('.dialog-backdrop, .menu, .lightbox')) {
         this.stop();
       }
     });
@@ -182,20 +217,18 @@ export class App {
   }
 
   #renderStatus() {
-    const pill = $('#status-pill');
-    const { state } = this.connection;
-    const s = this.settings.all();
-    const provider = this.connection.providers.find((p) => p.id === s.provider && p.configured) || this.connection.activeProvider;
-    const model = provider?.models.includes(s.model) ? s.model : provider?.defaultModel;
-    const labels = {
-      checking: 'Checking…',
-      connected: model || provider?.name || 'Connected',
-      disconnected: 'AI not connected',
-      offline: 'Server offline',
-    };
-    pill.dataset.state = state;
-    pill.querySelector('.status-label').textContent = labels[state];
-    pill.title = state === 'connected' ? `Connected to ${provider?.name}` : 'Open AI settings';
+    this.picker.render();
+    // Image uploads are only offered when an AI that can see them is available.
+    const { state, status } = this.connection;
+    if (state !== 'connected') {
+      this.composer.setImageSupport(false, state === 'checking' ? 'Checking which AIs are available…' : 'Image uploads need a connected AI provider.');
+    } else if (!status?.vision) {
+      this.composer.setImageSupport(false, 'None of the AI providers connected to Drone Hive AI can read images, so image uploads are turned off.');
+    } else if (!this.picker.canSeeImages) {
+      this.composer.setImageSupport(false, `${this.picker.label()} can’t read images. Switch to Automatic or Default in the AI menu to send images.`);
+    } else {
+      this.composer.setImageSupport(true);
+    }
   }
 
   // ── conversations ──────────────────────────────────────
@@ -222,7 +255,9 @@ export class App {
     });
     if (!ok) return;
     if (this.sending?.convId === id) this.stop();
+    const images = this.store.attachmentIds(id);
     this.store.delete(id);
+    deleteAttachments(images);
     toast('Conversation deleted', { type: 'success' });
   }
 
@@ -236,6 +271,7 @@ export class App {
     if (!ok) return;
     this.stop();
     this.store.clearAll();
+    clearAttachments();
     toast('All conversations deleted', { type: 'success' });
   }
 
@@ -260,12 +296,18 @@ export class App {
 
   // ── messaging ─────────────────────────────────────────
   /** Returns false if the message was not accepted (so the composer keeps the text). */
-  send(text) {
+  send(text, attachments = []) {
     const content = text.replace(/^\s*\n/, '').replace(/\s+$/, '');
-    if (!content.trim()) return false;
+    if (!content.trim() && !attachments.length) return false;
     if (this.sending) return false; // prevents duplicate sends
+    closeMenu();
+    const refs = attachments.slice(0, LIMITS.maxImagesPerMessage).map(({ blob, meta }) => {
+      const id = `img-${uid()}`;
+      this.pendingWrites = this.pendingWrites.then(() => putAttachment(id, blob));
+      return { id, ...meta };
+    });
     const conv = this.store.active || this.store.create();
-    this.store.addMessage(conv.id, { role: 'user', content });
+    this.store.addMessage(conv.id, { role: 'user', content, attachments: refs });
     this.chat.scrollToBottom(false);
     this.#requestReply(conv.id);
     return true;
@@ -295,11 +337,6 @@ export class App {
     const conv = this.store.get(convId);
     if (!conv || this.sending) return;
 
-    // Only real user/assistant turns go to the AI — never app notices.
-    const history = conv.messages
-      .filter((m) => m.role === 'user' || (m.role === 'assistant' && m.content && m.status !== 'streaming'))
-      .map((m) => ({ role: m.role, content: m.content }));
-
     const placeholder = this.store.addMessage(convId, { role: 'assistant', content: '', status: 'streaming' });
     const controller = new AbortController();
     this.sending = { convId, msgId: placeholder.id, controller };
@@ -309,6 +346,7 @@ export class App {
     let content = '';
     let meta = {};
     try {
+      const history = await this.#buildHistory(conv, placeholder.id);
       // If we already know no AI is reachable, re-check status (cheap, always 200)
       // instead of sending a request we know will fail.
       if (this.connection.state === 'disconnected' || this.connection.state === 'offline') {
@@ -318,7 +356,7 @@ export class App {
       }
       const result = await sendChat({
         messages: history,
-        provider: s.provider,
+        provider: this.picker.choice,
         model: s.model || undefined,
         options: {
           temperature: s.temperature ?? undefined,
@@ -330,7 +368,15 @@ export class App {
         authToken: this.auth.required ? (await this.auth.getToken()) || undefined : undefined,
         signal: controller.signal,
         onEvent: (ev) => {
-          if (ev.type === 'start') meta = { provider: ev.provider?.id, model: ev.model };
+          if (ev.type === 'routing') {
+            meta = { routing: ev.mode };
+            this.store.updateMessage(convId, placeholder.id, { meta }, { stream: true });
+          }
+          if (ev.type === 'start') {
+            meta = { provider: ev.provider?.id, providerName: ev.provider?.shortName || ev.provider?.name, model: ev.model, mode: ev.mode, rerouted: Boolean(ev.rerouted) };
+            this.store.updateMessage(convId, placeholder.id, { meta }, { stream: true });
+          }
+          if (ev.type === 'done' && ev.quota) this.quota = ev.quota;
           if (ev.type === 'delta') {
             content += ev.text;
             this.store.updateMessage(convId, placeholder.id, { content, meta }, { stream: true });
@@ -345,7 +391,7 @@ export class App {
         this.store.updateMessage(convId, placeholder.id, {
           content,
           status: 'complete',
-          meta: { provider: result.provider?.id, model: result.model, usage: result.usage, stopReason: result.stopReason },
+          meta: { ...meta, usage: result.usage, stopReason: result.stopReason },
         });
       }
       if (this.connection.state !== 'connected') this.connection.refresh();
@@ -359,13 +405,24 @@ export class App {
         else this.store.removeMessage(convId, placeholder.id);
         const code = err?.code || 'UNKNOWN';
         const authCode = ['AUTH_REQUIRED', 'AUTH_EXPIRED'].includes(code);
-        const variant = code === 'PROVIDER_NOT_CONFIGURED' ? 'disconnected' : code === 'BACKEND_UNAVAILABLE' ? 'offline' : authCode ? 'auth' : 'error';
-        this.store.addMessage(convId, {
-          role: 'notice',
-          variant,
-          content: NOTICE_TEXT[variant] || err?.message || 'Something went wrong while getting a reply.',
-          meta: { code },
-        });
+        if (code === 'DUPLICATE_REQUEST') {
+          toast('That message is already being answered.');
+          return;
+        }
+        const variant =
+          code === 'PROVIDER_NOT_CONFIGURED' && this.connection.state !== 'connected' ? 'disconnected'
+          : code === 'BACKEND_UNAVAILABLE' ? 'offline'
+          : authCode ? 'auth'
+          : ['USAGE_LIMIT', 'GLOBAL_LIMIT', 'SERVICE_PAUSED'].includes(code) ? 'limit'
+          : ['ALL_PROVIDERS_FAILED', 'RATE_LIMITED'].includes(code) ? 'busy'
+          : ['VISION_UNSUPPORTED', 'INVALID_IMAGE'].includes(code) ? 'image'
+          : 'error';
+        let text = NOTICE_TEXT[variant] || err?.message || 'Something went wrong while getting a reply.';
+        if (variant === 'limit' && err?.resetAt && code !== 'SERVICE_PAUSED') {
+          const when = formatReset(err.resetAt);
+          if (when) text = `${text.replace(/ ?(Your usage resets every day at midnight UTC\.|New messages will work again after the daily reset at midnight UTC\.|You can send more after the hour resets\.)/, '')} You can send messages again ${when}.`;
+        }
+        this.store.addMessage(convId, { role: 'notice', variant, content: text, meta: { code } });
         this.connection.markFromError(code);
         // Server says sign-in is needed (e.g. it was just turned on): re-check status to show the sign-in screen.
         if (authCode || code === 'EMAIL_NOT_VERIFIED') this.connection.refresh();
@@ -375,5 +432,34 @@ export class App {
       this.sending = null;
       this.composer.setBusy(false);
     }
+  }
+
+  /**
+   * Turns the conversation into the request format. Only real user/assistant
+   * turns go to the AI — never app notices. Images from the most recent
+   * messages are loaded from this browser's storage and attached.
+   */
+  async #buildHistory(conv, placeholderId) {
+    await this.pendingWrites;
+    const turns = conv.messages.filter(
+      (m) => m.id !== placeholderId && (m.role === 'user' || (m.role === 'assistant' && m.content && m.status !== 'streaming')),
+    );
+    const firstWithImages = Math.max(0, turns.length - IMAGE_HISTORY_MESSAGES);
+    return Promise.all(
+      turns.map(async (m, i) => {
+        const atts = m.role === 'user' && i >= firstWithImages ? (m.attachments || []).filter((a) => a.kind === 'image') : [];
+        if (!atts.length) {
+          const note = m.attachments?.length ? `${m.content}${m.content ? '\n\n' : ''}[Image shared earlier]` : m.content;
+          return { role: m.role, content: note };
+        }
+        const images = (await Promise.all(atts.map((a) => attachmentBase64(a.id)))).filter(Boolean);
+        const missing = atts.length - images.length;
+        const text = missing ? `${m.content}${m.content ? '\n\n' : ''}[${missing} image(s) no longer available on this device]` : m.content;
+        return {
+          role: 'user',
+          content: [...(text ? [{ type: 'text', text }] : []), ...images.map((img) => ({ type: 'image', mediaType: img.mediaType, data: img.data }))],
+        };
+      }),
+    );
   }
 }

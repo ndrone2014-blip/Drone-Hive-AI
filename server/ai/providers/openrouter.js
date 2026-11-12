@@ -19,6 +19,8 @@ import { openChatCompletions } from './openai-compatible.js';
  */
 const BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_MODELS = ['openrouter/free', 'openai/gpt-oss-120b:free'];
+// The free router accepts images and picks a free model that can see them.
+const DEFAULT_VISION_MODELS = ['openrouter/free'];
 
 export function isFreeOpenRouterModel(id) {
   return id === 'openrouter/free' || /:free$/.test(id);
@@ -27,7 +29,8 @@ export function isFreeOpenRouterModel(id) {
 export const openRouterProvider = {
   id: 'openrouter',
   name: 'OpenRouter',
-  capabilities: { streaming: true, vision: false, documents: false, tools: false },
+  shortName: 'OpenRouter',
+  capabilities: { streaming: true, vision: true, documents: false, tools: false },
 
   getConfig() {
     const apiKey = getEnv('OPENROUTER_API_KEY');
@@ -40,7 +43,9 @@ export const openRouterProvider = {
       if (!models.length) models = [...DEFAULT_MODELS];
       if (!models.includes(defaultModel)) defaultModel = models[0];
     }
-    return { configured: Boolean(apiKey), apiKey, baseUrl: BASE_URL, models, defaultModel, allowPaid };
+    let visionModels = getEnvList('OPENROUTER_VISION_MODELS') || DEFAULT_VISION_MODELS;
+    if (!allowPaid) visionModels = visionModels.filter(isFreeOpenRouterModel);
+    return { configured: Boolean(apiKey), apiKey, baseUrl: BASE_URL, models, defaultModel, allowPaid, visionModels, maxImages: 4 };
   },
 
   async open({ model, system, messages, maxTokens, temperature, signal }) {
@@ -48,6 +53,7 @@ export const openRouterProvider = {
     if (!cfg.configured) throw new AIError(ERROR_CODES.PROVIDER_NOT_CONFIGURED, 'OpenRouter API key is not set (OPENROUTER_API_KEY).', 503);
     // Belt and braces: never send a paid model unless explicitly allowed.
     if (!cfg.allowPaid && !isFreeOpenRouterModel(model)) model = cfg.defaultModel;
+    if (!cfg.allowPaid && !isFreeOpenRouterModel(model)) throw new AIError(ERROR_CODES.MODEL_NOT_FOUND, 'OpenRouter has no free model configured.', 502);
     return openChatCompletions({
       ...cfg,
       providerName: this.name,
@@ -57,6 +63,7 @@ export const openRouterProvider = {
       maxTokens,
       temperature,
       signal,
+      includeUsage: true,
       // Optional attribution headers OpenRouter shows on its dashboard.
       extraHeaders: { 'x-title': 'Drone Hive AI', 'http-referer': getEnv('URL', 'https://dronehiveai.netlify.app') },
     });

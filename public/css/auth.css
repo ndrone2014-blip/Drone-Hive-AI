@@ -2,7 +2,8 @@
 .auth-locked .app { visibility: hidden; }
 .auth-gate {
   position: fixed; inset: 0; z-index: 90;
-  display: grid; place-items: center; padding: 20px; overflow-y: auto;
+  display: grid; place-items: center; overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   background: var(--bg) var(--hex-pattern);
   animation: fade-in 200ms var(--ease);
 }

@@ -13,8 +13,9 @@ import { STORAGE_KEYS, LIMITS } from '../config.js';
  *   { id, role: 'user' | 'assistant' | 'notice', content, createdAt,
  *     status: 'complete' | 'streaming' | 'stopped' | 'interrupted',
  *     variant?: 'disconnected' | 'error',   // for notices
- *     attachments: [],                       // FUTURE: file/image uploads
- *     meta?: { provider, model, usage } }
+ *     attachments: [{ id, kind: 'image', name, mime, width, height, size }],
+ *                                            // image data lives in IndexedDB (core/attachments.js)
+ *     meta?: { provider, providerName, model, mode, rerouted, usage } }
  *
  * 'notice' messages are app messages (e.g. "AI not connected"). They are shown
  * in the chat but never sent to the AI.
@@ -63,6 +64,7 @@ export class ConversationStore extends Emitter {
         // A reply that was streaming when the page closed can't be resumed.
         messages: c.messages
           .filter((m) => m && typeof m.content === 'string')
+          .map((m) => (Array.isArray(m.attachments) ? m : { ...m, attachments: [] }))
           .map((m) => (m.status === 'streaming' ? { ...m, status: 'interrupted' } : m))
           .filter((m) => !(m.role === 'assistant' && m.status === 'interrupted' && !m.content)),
       }));
@@ -198,7 +200,7 @@ export class ConversationStore extends Emitter {
     c.messages.push(msg);
     c.updatedAt = msg.createdAt;
     if (msg.role === 'user' && !c.titleLocked && c.messages.filter((m) => m.role === 'user').length === 1) {
-      c.title = makeTitle(msg.content);
+      c.title = msg.content.trim() ? makeTitle(msg.content) : msg.attachments.length ? 'Image conversation' : 'New conversation';
     }
     this.#changed('message-add', { id: convId, messageId: msg.id });
     return msg;
@@ -234,6 +236,20 @@ export class ConversationStore extends Emitter {
     this.#changed('message-remove', { id: convId });
   }
 
+  /** IDs of stored images used by one conversation (or all of them). */
+  attachmentIds(convId = null) {
+    const list = convId ? [this.get(convId)].filter(Boolean) : this.conversations;
+    return list.flatMap((c) => c.messages.flatMap((m) => (m.attachments || []).map((a) => a.id))).filter(Boolean);
+  }
+
+  /** IDs of images used by messages from `msgId` onward (for regenerate/truncate cleanup). */
+  attachmentIdsFrom(convId, msgId) {
+    const c = this.get(convId);
+    const i = c ? c.messages.findIndex((m) => m.id === msgId) : -1;
+    if (i === -1) return [];
+    return c.messages.slice(i).flatMap((m) => (m.attachments || []).map((a) => a.id));
+  }
+
   // ── export ──────────────────────────────────────────────
   exportJSON(ids = null) {
     const list = ids ? this.conversations.filter((c) => ids.includes(c.id)) : this.list();
@@ -256,7 +272,8 @@ export class ConversationStore extends Emitter {
     const lines = [`# ${c.title}`, '', `_Exported from Drone Hive AI · ${new Date().toLocaleString()}_`, ''];
     for (const m of c.messages) {
       if (m.role === 'notice') continue;
-      lines.push(`## ${m.role === 'user' ? 'You' : 'Drone Hive AI'}`, `_${new Date(m.createdAt).toLocaleString()}_`, '', m.content, '');
+      const imgs = (m.attachments || []).map((a) => `_[Image: ${a.name || 'image'}]_`);
+      lines.push(`## ${m.role === 'user' ? 'You' : 'Drone Hive AI'}`, `_${new Date(m.createdAt).toLocaleString()}_`, '', ...imgs, m.content, '');
     }
     return lines.join('\n');
   }

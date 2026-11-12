@@ -7,6 +7,8 @@ export class SettingsStore extends Emitter {
     this.storage = storage;
     const saved = storage.load(STORAGE_KEYS.settings, {});
     this.state = { ...DEFAULT_SETTINGS, ...(saved && typeof saved === 'object' ? saved : {}) };
+    // v0.1 used "auto" for what is now called "default".
+    if (this.state.provider === 'auto' || !this.state.provider) this.state.provider = 'default';
   }
 
   get(key) {

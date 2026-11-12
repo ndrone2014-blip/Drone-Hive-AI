@@ -14,5 +14,14 @@ function start() {
   }
 }
 
+/** Home Screen app support: offline launch + fast start. Never caches AI requests. */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || location.protocol !== 'https:' && location.hostname !== 'localhost') return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((err) => console.warn('[Drone Hive AI] Offline support unavailable', err));
+  });
+}
+registerServiceWorker();
+
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
 else start();

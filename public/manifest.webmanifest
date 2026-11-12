@@ -1,13 +1,26 @@
 {
+  "id": "/",
   "name": "Drone Hive AI",
   "short_name": "Drone Hive AI",
-  "description": "An AI assistant by Drone Hive Studios",
-  "start_url": "/",
+  "description": "An AI assistant for code, ideas and writing — by Drone Hive Studios.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/?source=homescreen",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#F7F6F2",
-  "theme_color": "#0F0E0C",
+  "theme_color": "#F7F6F2",
+  "categories": ["productivity", "developer", "utilities"],
   "icons": [
-    { "src": "/assets/brand/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "/assets/brand/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ],
+  "shortcuts": [
+    { "name": "New chat", "short_name": "New chat", "url": "/?source=shortcut", "icons": [{ "src": "/assets/icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

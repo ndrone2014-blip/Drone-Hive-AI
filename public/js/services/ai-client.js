@@ -5,11 +5,12 @@ import { API } from '../config.js';
  * provider directly, so API keys stay on the server.
  */
 export class AIClientError extends Error {
-  constructor(code, message, status = 0) {
+  constructor(code, message, status = 0, extra = {}) {
     super(message);
     this.name = 'AIClientError';
     this.code = code;
     this.status = status;
+    this.resetAt = extra.resetAt || null;
   }
 }
 
@@ -36,7 +37,7 @@ export async function fetchStatus({ signal } = {}) {
 /**
  * Sends a conversation and receives the reply.
  * @param {object} p
- * @param {{role:string, content:string}[]} p.messages
+ * @param {{role:string, content:string|object[]}[]} p.messages  content parts may include { type:'image', mediaType, data }
  * @param {(event:object)=>void} p.onEvent  called with {type:'start'|'delta'|'done', ...}
  * @returns {Promise<{content:string, provider?:object, model?:string, usage?:object, stopReason?:string}>}
  */
@@ -64,11 +65,14 @@ export async function sendChat({ messages, provider, model, options, stream = tr
   if (!res.ok) {
     if (type.includes('application/json')) {
       const data = await res.json().catch(() => ({}));
-      throw new AIClientError(data?.error?.code || 'SERVER_ERROR', data?.error?.message || `Server error (HTTP ${res.status}).`, res.status);
+      throw new AIClientError(data?.error?.code || 'SERVER_ERROR', data?.error?.message || `Server error (HTTP ${res.status}).`, res.status, data?.error || {});
     }
     // Netlify's built-in rate limiter answers with a plain (non-JSON) 429.
     if (res.status === 429) {
       throw new AIClientError('RATE_LIMITED', 'You’re sending messages too fast. Wait a minute and try again.', 429);
+    }
+    if (res.status === 413) {
+      throw new AIClientError('INVALID_REQUEST', 'That message (with its images) is too large to send. Remove an image and try again.', 413);
     }
     // 404 / HTML response = the API isn't running at this address.
     throw new AIClientError('BACKEND_UNAVAILABLE', 'The Drone Hive AI server is not running at this address.', res.status);
@@ -77,10 +81,10 @@ export async function sendChat({ messages, provider, model, options, stream = tr
   // Non-streaming JSON reply
   if (type.includes('application/json')) {
     const data = await res.json();
-    onEvent({ type: 'start', provider: data.provider, model: data.model });
+    onEvent({ type: 'start', provider: data.provider, model: data.model, mode: data.mode, rerouted: data.rerouted });
     if (data.message?.content) onEvent({ type: 'delta', text: data.message.content });
-    onEvent({ type: 'done', stopReason: data.stopReason, usage: data.usage });
-    return { content: data.message?.content || '', provider: data.provider, model: data.model, usage: data.usage, stopReason: data.stopReason };
+    onEvent({ type: 'done', stopReason: data.stopReason, usage: data.usage, quota: data.quota });
+    return { content: data.message?.content || '', provider: data.provider, model: data.model, mode: data.mode, rerouted: data.rerouted, usage: data.usage, stopReason: data.stopReason, quota: data.quota };
   }
 
   if (!type.includes('ndjson') || !res.body) {
@@ -102,13 +106,14 @@ export async function sendChat({ messages, provider, model, options, stream = tr
       return;
     }
     if (ev.type === 'error') {
-      const e = new AIClientError(ev.error?.code || 'PROVIDER_ERROR', ev.error?.message || 'The AI provider returned an error.');
+      const e = new AIClientError(ev.error?.code || 'PROVIDER_ERROR', ev.error?.message || 'The AI provider returned an error.', 0, ev.error || {});
       e.partial = result.content;
       throw e;
     }
-    if (ev.type === 'start') Object.assign(result, { provider: ev.provider, model: ev.model });
+    if (ev.type === 'ping') return; // keep-alive while the server picks a provider
+    if (ev.type === 'start') Object.assign(result, { provider: ev.provider, model: ev.model, mode: ev.mode, rerouted: ev.rerouted });
     if (ev.type === 'delta') result.content += ev.text;
-    if (ev.type === 'done') Object.assign(result, { usage: ev.usage, stopReason: ev.stopReason });
+    if (ev.type === 'done') Object.assign(result, { usage: ev.usage, stopReason: ev.stopReason, quota: ev.quota });
     onEvent(ev);
   };
 

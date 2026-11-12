@@ -10,8 +10,14 @@ import { normalizeMessages } from '../server/ai/messages.js';
 import { parseSSE } from '../server/ai/sse.js';
 import { _resetSecurityState } from '../server/security.js';
 import { _setAuthKeys, _resetAuthKeys } from '../server/auth.js';
+import { _resetUsageState } from '../server/usage/limits.js';
+import { _resetFirestoreToken } from '../server/usage/firestore.js';
+import { _resetRouterState, analyzeRequest, orderModels, stripThinking } from '../server/ai/router.js';
 
-const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'OPENROUTER_MODELS', 'OPENROUTER_ALLOW_PAID', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED'];
+const ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_MODELS', 'OPENAI_COMPAT_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_MODEL', 'DRONEHIVE_ACCESS_CODE', 'AI_PROVIDER', 'OLLAMA_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'OLLAMA_MODELS', 'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODELS', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'OPENROUTER_MODELS', 'OPENROUTER_ALLOW_PAID', 'NETLIFY_AI_GATEWAY_KEY', 'NETLIFY_AI_GATEWAY_BASE_URL', 'ANTHROPIC_BASE_URL', 'ALLOW_NETLIFY_AI_GATEWAY', 'FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID', 'AUTH_REQUIRED',
+  'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_MODELS', 'OPENAI_COMPAT_MODELS', 'OPENAI_COMPAT_NAME', 'AI_DEFAULT_FALLBACK', 'AI_EMERGENCY_STOP',
+  'AI_GLOBAL_DAILY_REQUESTS', 'AI_HOURLY_REQUESTS_PER_USER', 'AI_DAILY_REQUESTS_PER_USER', 'AI_DAILY_TOKENS_PER_USER', 'AI_RATE_LIMIT_PER_MINUTE',
+  'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY', 'FIREBASE_SERVICE_ACCOUNT', 'USAGE_STORE', 'NETLIFY', 'GEMINI_REASONING_EFFORT', 'AI_MAX_CONCURRENT_PER_USER'];
 const realFetch = globalThis.fetch;
 let saved;
 
@@ -20,6 +26,9 @@ beforeEach(() => {
   ENV_KEYS.forEach((k) => delete process.env[k]);
   _resetSecurityState();
   _resetAuthKeys();
+  _resetUsageState();
+  _resetRouterState();
+  _resetFirestoreToken();
 });
 afterEach(() => {
   ENV_KEYS.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])));
@@ -98,7 +107,8 @@ test('anthropic provider streams deltas as NDJSON and sends the right request', 
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /ndjson/);
   const events = await readNDJSON(res);
-  assert.equal(events[0].type, 'start');
+  assert.equal(events[0].type, 'routing');
+  assert.equal(events[1].type, 'start');
   assert.equal(events.filter((e) => e.type === 'delta').map((e) => e.text).join(''), 'Hello there');
   assert.equal(events.at(-1).type, 'done');
   assert.equal(events.at(-1).stopReason, 'end_turn');
@@ -122,9 +132,12 @@ test('non-streaming mode returns a single JSON message', async () => {
 test('provider auth errors map to PROVIDER_AUTH without leaking the key', async () => {
   process.env.ANTHROPIC_API_KEY = 'bad-key';
   globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'invalid x-api-key' } }), { status: 401 });
-  const res = await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hey' }] }));
+  const res = await handleChatRequest(chatReq({ stream: false, messages: [{ role: 'user', content: 'hey' }] }));
   const body = await res.text();
   assert.equal(JSON.parse(body).error.code, 'PROVIDER_AUTH');
+  // Streaming mode reports the same error inside the stream
+  const streamed = await readNDJSON(await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hey again' }] })));
+  assert.equal(streamed.at(-1).type, 'error');
   assert.ok(!body.includes('bad-key'));
 });
 
@@ -299,7 +312,10 @@ test('daily token budget blocks a visitor once used up', async () => {
     await first.text();
     const second = await handleChatRequest(chatReq(msg()), { ip: '3.3.3.3' });
     assert.equal(second.status, 429);
-    assert.match((await second.json()).error.message, /token limit/i);
+    const err = (await second.json()).error;
+    assert.equal(err.code, 'USAGE_LIMIT');
+    assert.match(err.message, /allowance/i);
+    assert.ok(err.resetAt, 'tells the browser when usage resets');
   } finally {
     delete process.env.AI_DAILY_TOKENS_PER_USER;
   }
@@ -354,16 +370,24 @@ test('output tokens are capped and huge inputs are trimmed or rejected', async (
 
 test('oversized request bodies are rejected', async () => {
   process.env.ANTHROPIC_API_KEY = 'k';
-  const big = await handleChatRequest(chatReq(msg('x'.repeat(600 * 1024))));
+  const big = await handleChatRequest(chatReq(msg('x'.repeat(9 * 1024 * 1024))));
   assert.equal(big.status, 413);
+  const long = await handleChatRequest(chatReq(msg('x'.repeat(20000))));
+  assert.equal(long.status, 400, 'messages over the character limit are refused');
 });
 
 test('provider error details are never sent to the browser', async () => {
   process.env.ANTHROPIC_API_KEY = 'k';
   globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'internal-trace-xyz' } }), { status: 500 });
-  const res = await handleChatRequest(chatReq(msg()));
-  const body = await res.json();
+  const res = await handleChatRequest(chatReq({ ...msg(), stream: false }));
+  const raw = await res.text();
+  const body = JSON.parse(raw);
   assert.equal(body.error.details, undefined);
+  assert.ok(!raw.includes('internal-trace-xyz'));
+  // 400 errors used to echo the provider's text; not any more
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: 'secret-internal-400' } }), { status: 400 });
+  const raw2 = await (await handleChatRequest(chatReq({ ...msg('second'), stream: false }))).text();
+  assert.ok(!raw2.includes('secret-internal-400'));
   assert.equal(res.headers.get('x-frame-options'), 'DENY');
 });
 
@@ -378,7 +402,7 @@ test('access code ignores accidental spaces', async () => {
 test('provider 402 (free usage used up) gets a clear message', async () => {
   process.env.OLLAMA_API_KEY = 'k';
   globalThis.fetch = async () => new Response('{"error":"usage limit"}', { status: 402 });
-  const res = await handleChatRequest(chatReq(msg()));
+  const res = await handleChatRequest(chatReq({ ...msg(), stream: false }));
   const body = await res.json();
   assert.equal(res.status, 429);
   assert.match(body.error.message, /used up its free usage/);
@@ -400,7 +424,7 @@ test('falls back to the next model when one is overloaded', async () => {
     const res = await handleChatRequest(chatReq(msg()));
     const events = await readNDJSON(res);
     assert.deepEqual(tried, ['busy-model', 'free-model']);
-    assert.equal(events[0].model, 'free-model');
+    assert.equal(events.find((e) => e.type === 'start').model, 'free-model');
     assert.ok(events.some((e) => e.type === 'delta' && e.text === 'hi'));
   } finally {
     delete process.env.OPENAI_COMPAT_MODELS;

@@ -20,8 +20,7 @@ export class Sidebar {
     this.list = $('#conv-list');
     this.search = $('#search-input');
 
-    $('#sidebar-collapse').innerHTML = icon('sidebar');
-    $('#sidebar-expand').innerHTML = icon('sidebar');
+    this.#renderToggleIcons();
     $('#topbar-new-chat').innerHTML = icon('plus');
     $('#new-chat').innerHTML = `${icon('plus', { size: 17 })}<span>New chat</span>`;
     $('.search-icon').innerHTML = icon('search', { size: 16 });
@@ -38,6 +37,9 @@ export class Sidebar {
       this.closeMobile();
     });
     $('#topbar-new-chat').addEventListener('click', () => this.actions.newChat());
+    this.search.addEventListener('focus', () => {
+      if (MOBILE_QUERY.matches && !document.documentElement.classList.contains('sidebar-open')) this.toggle(true);
+    });
     $('#brand-home').addEventListener('click', (e) => {
       e.preventDefault();
       this.actions.newChat();
@@ -46,8 +48,15 @@ export class Sidebar {
     $('#sidebar-collapse').addEventListener('click', () => this.toggle(false));
     $('#sidebar-expand').addEventListener('click', () => this.toggle(true));
     $('#sidebar-backdrop').addEventListener('click', () => this.closeMobile());
-    $('#settings-btn').addEventListener('click', () => this.actions.openSettings('general'));
-    $('#profile-btn').addEventListener('click', () => (this.account ? this.actions.openSettings('account') : this.actions.openSettings('general', 'displayName')));
+    $('#settings-btn').addEventListener('click', () => {
+      this.closeMobile();
+      this.actions.openSettings('general');
+    });
+    $('#profile-btn').addEventListener('click', () => {
+      this.closeMobile();
+      if (this.account) this.actions.openSettings('account');
+      else this.actions.openSettings('general', 'displayName');
+    });
 
     let t;
     this.search.addEventListener('input', () => {
@@ -95,7 +104,36 @@ export class Sidebar {
       }
     });
 
-    MOBILE_QUERY.addEventListener('change', () => this.closeMobile());
+    MOBILE_QUERY.addEventListener('change', () => {
+      this.closeMobile();
+      this.#renderToggleIcons();
+    });
+
+    // Swipe left on the drawer to close it (phones).
+    let startX = null;
+    let startY = 0;
+    this.el.addEventListener('touchstart', (e) => {
+      if (!MOBILE_QUERY.matches) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    }, { passive: true });
+    this.el.addEventListener('touchend', (e) => {
+      if (startX === null) return;
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = Math.abs(e.changedTouches[0].clientY - startY);
+      startX = null;
+      if (dx < -60 && dy < 50) this.closeMobile();
+    }, { passive: true });
+  }
+
+  #renderToggleIcons() {
+    const mobile = MOBILE_QUERY.matches;
+    $('#sidebar-expand').innerHTML = icon(mobile ? 'menu' : 'sidebar', { size: mobile ? 20 : 18 });
+    $('#sidebar-collapse').innerHTML = icon(mobile ? 'x' : 'sidebar');
+    $('#sidebar-collapse').setAttribute('aria-label', mobile ? 'Close menu' : 'Collapse sidebar');
+    $('#sidebar-collapse').title = mobile ? 'Close menu' : 'Collapse sidebar';
+    $('#sidebar-expand').setAttribute('aria-label', mobile ? 'Open menu' : 'Open sidebar');
+    $('#sidebar-expand').title = mobile ? 'Open menu' : 'Open sidebar';
   }
 
   #openItemMenu(anchor, id) {
@@ -103,13 +141,16 @@ export class Sidebar {
       { label: 'Rename', icon: 'pencil', onSelect: () => this.startRename(id) },
       { label: 'Export as Markdown', icon: 'download', onSelect: () => this.actions.exportMarkdown(id) },
       { label: 'Delete', icon: 'trash', danger: true, onSelect: () => this.actions.delete(id) },
-    ]);
+    ], { title: this.store.get(id)?.title || 'Conversation' });
   }
 
   /** Collapse/expand. On mobile this opens/closes the drawer instead. */
   toggle(open) {
     if (MOBILE_QUERY.matches) {
       document.documentElement.classList.toggle('sidebar-open', open);
+      // Keep taps and screen readers out of the chat behind the open drawer.
+      $('#main').inert = open;
+      if (open) requestAnimationFrame(() => (this.list.querySelector('.conv-item.active') || $('#new-chat')).focus({ preventScroll: true }));
       return;
     }
     document.documentElement.classList.toggle('sidebar-collapsed', !open);
@@ -117,7 +158,9 @@ export class Sidebar {
   }
 
   closeMobile() {
+    if (!document.documentElement.classList.contains('sidebar-open')) return;
     document.documentElement.classList.remove('sidebar-open');
+    $('#main').inert = false;
   }
 
   focusSearch() {

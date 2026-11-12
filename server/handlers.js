@@ -1,16 +1,9 @@
 import { getServerConfig } from './config.js';
-import { getStatus, openChat } from './ai/service.js';
+import { getStatus, prepareChat, startChat } from './ai/service.js';
 import { enforceAuth, publicAuthStatus } from './auth.js';
-import { AIError, ERROR_CODES, toAIError } from './ai/errors.js';
-import {
-  API_SECURITY_HEADERS,
-  clientKey,
-  enforceAccessCode,
-  enforceRateLimits,
-  enforceSameOrigin,
-  recordTokenUsage,
-  remainingDailyTokens,
-} from './security.js';
+import { AIError, ERROR_CODES, toAIError, redact } from './ai/errors.js';
+import { beginUsage } from './usage/limits.js';
+import { API_SECURITY_HEADERS, clientKey, enforceAccessCode, enforceSameOrigin } from './security.js';
 
 /**
  * HTTP handlers built on the web-standard Request/Response API, so the exact
@@ -19,16 +12,22 @@ import {
  * `info.ip` is the visitor's IP address (Netlify passes it in context.ip).
  */
 
-const MAX_BODY_BYTES = 512 * 1024;
+// Text-only chats are small; this leaves room for up to 4 compressed images.
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
+const PING_MS = 8000;
 const JSON_HEADERS = { ...API_SECURITY_HEADERS, 'content-type': 'application/json; charset=utf-8' };
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), { status, headers: { ...JSON_HEADERS, ...extraHeaders } });
 }
 
+function logError(e) {
+  if (e.details) console.warn(`[drone-hive-ai] ${e.code}: ${redact(String(e.details).slice(0, 400)).slice(0, 300)}`);
+}
+
 function errorResponse(err) {
   const e = toAIError(err);
-  if (e.details) console.warn(`[drone-hive-ai] ${e.code}: ${String(e.details).slice(0, 300)}`);
+  logError(e);
   return json({ error: e.toJSON() }, e.status || 500, e.headers || {});
 }
 
@@ -68,6 +67,14 @@ async function readBody(req) {
   }
 }
 
+/** Short fingerprint of the newest user message, to refuse duplicate submissions. */
+async function fingerprint(prep, mode) {
+  const last = prep.messages[prep.messages.length - 1];
+  const src = `${mode}|${prep.messages.length}|${last.content}|${(last.images || []).map((i) => i.bytes).join(',')}`;
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(src));
+  return [...new Uint8Array(d).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** GET /api/status */
 export async function handleStatusRequest(req) {
   if (req.method !== 'GET') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Use GET.' } }, 405, { allow: 'GET' });
@@ -78,7 +85,7 @@ export async function handleStatusRequest(req) {
   }
 }
 
-/** POST /api/chat  — streams NDJSON events, or returns JSON when stream:false */
+/** POST /api/chat — streams NDJSON events, or returns JSON when stream:false */
 export async function handleChatRequest(req, info = {}) {
   if (req.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Use POST.' } }, 405, { allow: 'POST' });
 
@@ -88,86 +95,150 @@ export async function handleChatRequest(req, info = {}) {
   // limit so one person can't multiply their allowance with extra accounts.
   let keys = [{ key: ipKey, scale: 1 }];
   let body;
-  let chat;
+  let prep;
+  let ticket;
   try {
     enforceSameOrigin(req);
     const user = await enforceAuth(req);
     if (user) keys = [{ key: `user:${user.uid}`, scale: 1 }, { key: ipKey, scale: 3 }];
     await enforceAccessCode(req, ipKey, getServerConfig().accessCode);
-    for (const k of keys) enforceRateLimits(k.key, Date.now(), k.scale);
     body = await readBody(req);
-    const budget = Math.min(...keys.map((k) => remainingDailyTokens(k.key, Date.now(), k.scale)));
-    chat = await openChat(body, { signal: req.signal, budget });
+    // Validate first, so broken requests never count against anyone's usage.
+    prep = prepareChat(body);
+    ticket = await beginUsage(keys, { fingerprint: await fingerprint(prep, prep.plan.mode) });
+    if (ticket.budget < 64) {
+      await ticket.finish(0);
+      throw new AIError(ERROR_CODES.USAGE_LIMIT, 'You’ve used today’s AI allowance. Your usage resets every day at midnight UTC.', 429).with({ resetAt: ticket.quota.resetAt });
+    }
+    prep.maxTokens = Math.max(64, Math.min(prep.maxTokens, ticket.budget));
   } catch (err) {
     return errorResponse(err);
   }
 
-  // Count tokens against this visitor's daily allowance. Uses the provider's
-  // real numbers when given, otherwise an estimate from the text.
+  // Token accounting: the provider's real numbers when given, else an estimate.
   let outputChars = 0;
-  let counted = false;
-  const countUsage = (usage) => {
-    if (counted) return;
-    counted = true;
-    const input = Number(usage?.inputTokens) || chat.inputTokensEstimate;
-    const output = Number(usage?.outputTokens) || Math.ceil(outputChars / 4);
-    for (const k of keys) recordTokenUsage(k.key, input + output);
-  };
-  const track = (ev) => {
-    if (ev?.type === 'delta') outputChars += String(ev.text || '').length;
-    if (ev?.type === 'done') countUsage(ev.usage);
+  let reported = null;
+  const tokensUsed = (answered) => {
+    if (!answered) return 0;
+    const input = Number(reported?.inputTokens) || prep.inputTokensEstimate;
+    const output = Number(reported?.outputTokens) || Math.ceil(outputChars / 4);
+    return input + output;
   };
 
-  const meta = { provider: chat.provider, model: chat.model };
+  const abort = new AbortController();
+  const signal = req.signal ? AbortSignal.any?.([req.signal, abort.signal]) || abort.signal : abort.signal;
 
-  // Non-streaming mode: collect everything, return one JSON response.
+  // ── Non-streaming mode: collect everything, return one JSON response. ──
   if (body.stream === false) {
+    let chat;
     try {
+      chat = await startChat(prep, { signal });
       let content = '';
       let done = {};
       for await (const ev of chat.events) {
-        track(ev);
-        if (ev.type === 'delta') content += ev.text;
-        else if (ev.type === 'done') done = ev;
+        if (ev.type === 'delta') {
+          content += ev.text;
+          outputChars += ev.text.length;
+        } else if (ev.type === 'done') {
+          done = ev;
+          reported = ev.usage;
+        }
       }
-      return json({ ...meta, message: { role: 'assistant', content }, stopReason: done.stopReason || null, usage: done.usage || {} });
+      await ticket.finish(tokensUsed(true));
+      return json({
+        provider: chat.provider,
+        model: chat.model,
+        mode: chat.mode,
+        rerouted: chat.rerouted,
+        message: { role: 'assistant', content },
+        stopReason: done.stopReason || null,
+        usage: done.usage || {},
+        quota: ticket.quota,
+      });
     } catch (err) {
-      countUsage();
+      const refund = !chat && toAIError(err).code !== ERROR_CODES.ABORTED;
+      await ticket.finish(tokensUsed(!refund), { refund });
       return errorResponse(err);
     }
   }
 
-  // Streaming mode: one JSON object per line (NDJSON).
+  // ── Streaming mode: one JSON object per line (NDJSON). ──
+  // The response starts right away (Netlify needs headers within 40s), then
+  // the router tries providers while small "ping" lines keep it alive.
   const encoder = new TextEncoder();
-  const iterator = chat.events[Symbol.asyncIterator]();
+  let iterator = null;
+  let answered = false;
+  let closed = false;
+  let ping = null;
+  // Refund the message only if every provider genuinely failed — never when the
+  // user cancels (that could otherwise be used to dodge the limits).
+  const finishOnce = (refund = false) => ticket.finish(tokensUsed(answered || !refund), { refund });
+
   const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(JSON.stringify({ type: 'start', ...meta }) + '\n'));
+    async start(controller) {
+      const send = (obj) => {
+        if (!closed) controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      };
+      send({ type: 'routing', mode: prep.plan.mode });
+      ping = setInterval(() => {
+        try {
+          send({ type: 'ping' });
+        } catch {
+          /* stream closed */
+        }
+      }, PING_MS);
+      try {
+        const chat = await startChat(prep, { signal });
+        iterator = chat.events[Symbol.asyncIterator]();
+        answered = true;
+        send({ type: 'start', provider: chat.provider, model: chat.model, mode: chat.mode, rerouted: chat.rerouted });
+      } catch (err) {
+        const e = toAIError(err);
+        logError(e);
+        if (e.code !== ERROR_CODES.ABORTED) send({ type: 'error', error: e.toJSON() });
+        await finishOnce(e.code !== ERROR_CODES.ABORTED);
+        closed = true;
+        controller.close();
+      } finally {
+        clearInterval(ping);
+      }
     },
     async pull(controller) {
+      if (closed) return;
       try {
         const { value, done } = await iterator.next();
         if (done) {
-          countUsage();
+          await finishOnce();
+          closed = true;
           controller.close();
           return;
         }
-        track(value);
+        if (value.type === 'delta') outputChars += String(value.text || '').length;
+        if (value.type === 'done') {
+          reported = value.usage;
+          await finishOnce();
+          controller.enqueue(encoder.encode(JSON.stringify({ ...value, quota: ticket.quota }) + '\n'));
+          return;
+        }
         controller.enqueue(encoder.encode(JSON.stringify(value) + '\n'));
       } catch (err) {
-        countUsage();
+        await finishOnce();
         const e = toAIError(err);
-        if (e.details) console.warn(`[drone-hive-ai] ${e.code}: ${String(e.details).slice(0, 300)}`);
-        if (e.code !== ERROR_CODES.ABORTED) {
+        logError(e);
+        if (e.code !== ERROR_CODES.ABORTED && !closed) {
           controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: e.toJSON() }) + '\n'));
         }
+        closed = true;
         controller.close();
       }
     },
     async cancel() {
-      countUsage();
+      closed = true;
+      clearInterval(ping);
+      abort.abort();
+      await finishOnce();
       try {
-        await iterator.return?.();
+        await iterator?.return?.();
       } catch {
         /* ignore */
       }

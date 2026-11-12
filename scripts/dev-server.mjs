@@ -21,9 +21,25 @@ loadDotEnv(path.join(ROOT, '.env'));
 const PORT = Number(process.env.PORT) || 8888;
 // Only reachable from this computer unless you set HOST=0.0.0.0 on purpose.
 const HOST = process.env.HOST || '127.0.0.1';
-const MAX_BODY_BYTES = 512 * 1024;
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 const { handleChatRequest, handleStatusRequest } = await import(pathToFileURL(path.join(ROOT, 'server', 'handlers.js')).href);
+
+// Use the same security headers as Netlify (from netlify.toml), so problems
+// like a blocked inline style show up locally too.
+const PAGE_HEADERS = (() => {
+  try {
+    const toml = readFileSync(path.join(ROOT, 'netlify.toml'), 'utf8');
+    const block = toml.split('[[headers]]').find((b) => /for\s*=\s*"\/\*"/.test(b)) || '';
+    const out = {};
+    for (const m of block.matchAll(/^\s*([A-Za-z-]+)\s*=\s*"(.*)"\s*$/gm)) if (m[1] !== 'for') out[m[1].toLowerCase()] = m[2];
+    out['content-security-policy'] = (out['content-security-policy'] || '').replace(/;?\s*upgrade-insecure-requests/, '');
+    delete out['strict-transport-security'];
+    return out;
+  } catch {
+    return {};
+  }
+})();
 
 const ROUTES = { '/api/chat': handleChatRequest, '/api/status': handleStatusRequest };
 
@@ -37,6 +53,7 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
   '.webmanifest': 'application/manifest+json',
   '.txt': 'text/plain; charset=utf-8',
 };
@@ -110,6 +127,7 @@ async function serveStatic(pathname, res) {
   }
   const data = await readFile(target);
   res.writeHead(200, {
+    ...PAGE_HEADERS,
     'content-type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream',
     'cache-control': 'no-cache',
   });

@@ -2,17 +2,36 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Drone Hive AI</title>
   <meta name="description" content="Drone Hive AI — an AI assistant for code, ideas and writing by Drone Hive Studios.">
+  <meta name="application-name" content="Drone Hive AI">
   <meta name="theme-color" content="#F7F6F2" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0F0E0C" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta name="format-detection" content="telephone=no">
+  <!-- Home Screen app (iPhone / iPad) -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Drone Hive AI">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta property="og:title" content="Drone Hive AI">
   <meta property="og:description" content="An AI assistant by Drone Hive Studios.">
   <meta property="og:image" content="/assets/brand/og-banner.png">
-  <link rel="icon" type="image/png" href="/assets/brand/favicon.png">
-  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
+  <!-- iPhone launch screens (generated from the Drone Hive emblem) -->
+  <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1320x2868.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1290x2796.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1206x2622.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1179x2556.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1284x2778.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1170x2532.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="/assets/splash/splash-1125x2436.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/assets/splash/splash-828x1792.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="/assets/splash/splash-750x1334.png">
   <!-- Apply saved theme before paint to avoid a flash -->
   <script src="/js/theme-init.js"></script>
   <link rel="stylesheet" href="/css/tokens.css">
@@ -68,11 +87,10 @@
           <button class="icon-btn" id="topbar-new-chat" type="button" title="New chat" aria-label="New chat"></button>
           <h1 class="topbar-title" id="topbar-title">New conversation</h1>
         </div>
-        <button class="status-pill" id="status-pill" type="button" data-state="checking" title="AI connection status">
-          <span class="status-dot"></span><span class="status-label">Checking…</span>
-        </button>
+        <button class="model-pill" id="model-pill" type="button" data-state="checking" aria-haspopup="menu" aria-expanded="false" title="Choose an AI"></button>
       </header>
 
+      <div class="drop-hint" aria-hidden="true"><span>Drop images to attach</span></div>
       <section class="chat" id="chat-scroll" aria-live="polite">
         <div class="chat-inner" id="chat-content"></div>
       </section>
@@ -80,10 +98,12 @@
 
       <footer class="composer-wrap" id="composer-wrap">
         <form class="composer" id="composer" autocomplete="off">
-          <textarea id="composer-input" class="composer-input" rows="1" placeholder="Message Drone Hive AI…" aria-label="Message Drone Hive AI"></textarea>
+          <div class="attach-tray" id="attach-tray" hidden></div>
+          <textarea id="composer-input" class="composer-input" rows="1" placeholder="Message Drone Hive AI…" aria-label="Message Drone Hive AI" autocapitalize="sentences" spellcheck="true"></textarea>
           <div class="composer-bar">
             <div class="composer-tools">
-              <button class="icon-btn" id="attach-btn" type="button" title="Attach files (coming soon)" aria-label="Attach files (coming soon)"></button>
+              <button class="icon-btn" id="attach-btn" type="button" title="Attach images" aria-label="Attach images"></button>
+              <input type="file" id="file-input" accept="image/*" multiple hidden tabindex="-1" aria-hidden="true">
               <button class="icon-btn" id="clear-btn" type="button" title="Clear message" aria-label="Clear message" hidden></button>
             </div>
             <div class="composer-right">

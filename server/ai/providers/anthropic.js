@@ -1,5 +1,5 @@
 import { getEnv, getEnvList } from '../../env.js';
-import { errorFromProviderResponse, AIError, ERROR_CODES } from '../errors.js';
+import { errorFromProviderResponse, streamError, AIError, ERROR_CODES } from '../errors.js';
 import { parseSSE } from '../sse.js';
 
 /**
@@ -14,6 +14,7 @@ const DEFAULT_MODELS = ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5-
 export const anthropicProvider = {
   id: 'anthropic',
   name: 'Anthropic Claude',
+  shortName: 'Claude',
   // What this integration currently passes through. Flip these on as the
   // features are built (images/PDFs are supported by the Claude API itself).
   capabilities: { streaming: true, vision: false, documents: false, tools: false },
@@ -43,6 +44,7 @@ export const anthropicProvider = {
       baseUrl: baseUrl.replace(/\/+$/, ''),
       models: [...new Set([defaultModel, ...listed])],
       defaultModel,
+      visionModels: [], // image input isn't wired up for this provider yet
     };
   },
 
@@ -97,7 +99,7 @@ async function* streamEvents(body, providerName) {
       if (json.delta?.stop_reason) stopReason = json.delta.stop_reason;
       if (json.usage?.output_tokens != null) usage.outputTokens = json.usage.output_tokens;
     } else if (type === 'error') {
-      throw new AIError(ERROR_CODES.PROVIDER_ERROR, `${providerName} error: ${json.error?.message || 'stream error'}`, 502);
+      throw streamError(providerName, json.error?.message);
     }
   }
   yield { type: 'done', stopReason, usage };

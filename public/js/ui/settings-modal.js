@@ -1,6 +1,6 @@
 import { html, escapeHtml, formatBytes, formatDateTime } from './dom.js';
 import { icon } from './icons.js';
-import { APP } from '../config.js';
+import { APP, AI_MODES } from '../config.js';
 
 const SECTIONS = [
   { id: 'general', label: 'General', icon: 'sliders' },
@@ -14,8 +14,9 @@ const SECTIONS = [
  * Settings dashboard (modal). Every control writes straight to SettingsStore.
  */
 export class SettingsModal {
-  constructor({ settings, store, connection, auth, actions }) {
+  constructor({ settings, store, connection, auth, actions, getQuota = () => null }) {
     this.auth = auth;
+    this.getQuota = getQuota;
     this.settings = settings;
     this.store = store;
     this.connection = connection;
@@ -82,7 +83,7 @@ export class SettingsModal {
     document.body.appendChild(this.el);
     requestAnimationFrame(() => this.el?.classList.add('show'));
 
-    this.el.addEventListener('mousedown', (e) => {
+    this.el.addEventListener('pointerdown', (e) => {
       if (e.target === this.el) this.close();
     });
     this.el.querySelector('.settings-close').addEventListener('click', () => this.close());
@@ -126,6 +127,7 @@ export class SettingsModal {
     const activeKey = content.contains(active) ? active.dataset.setting : null;
     const renderers = { general: () => this.#general(), account: () => this.#account(), ai: () => this.#ai(), data: () => this.#data(), about: () => this.#about() };
     content.innerHTML = renderers[this.section]();
+    content.querySelectorAll('[data-pct]').forEach((el) => (el.style.width = `${el.dataset.pct}%`));
     content.dataset.section = this.section;
     content.scrollTop = keepScroll;
     if (activeKey) content.querySelector(`[data-setting="${activeKey}"]`)?.focus();
@@ -204,13 +206,16 @@ export class SettingsModal {
     const { state, status } = this.connection;
     const providers = status?.providers || [];
     const configured = providers.filter((p) => p.configured);
-    const selected = providers.find((p) => p.id === s.provider && p.configured) || this.connection.activeProvider;
-    const models = selected?.models || [];
-    const model = models.includes(s.model) ? s.model : selected?.defaultModel || '';
+    const choice = s.provider === 'automatic' || s.provider === 'default' || configured.some((p) => p.id === s.provider) ? s.provider : 'default';
+    const active = this.connection.activeProvider;
+    const modelProvider = choice === 'default' ? active : choice === 'automatic' ? null : providers.find((p) => p.id === choice);
+    const models = modelProvider?.models || [];
+    const model = models.includes(s.model) ? s.model : modelProvider?.defaultModel || '';
     const maxOut = status?.limits?.maxOutputTokens || 2048;
+    const order = (status?.automaticOrder || ['gemini', 'openrouter', 'groq', 'ollama']).map((id) => providers.find((p) => p.id === id)).filter(Boolean);
 
     const stateInfo = {
-      connected: ['Connected', `Replies are powered by ${escapeHtml(this.connection.activeProvider?.name || 'your AI provider')}.`],
+      connected: ['Connected', `${configured.length} AI provider${configured.length === 1 ? '' : 's'} available. Default mode uses ${escapeHtml(active?.name || 'your standard provider')}.`],
       disconnected: ['Not connected', 'The server is running, but no AI provider API key has been added yet.'],
       offline: ['Server not reachable', 'The app is open, but its API server is not running at this address.'],
       checking: ['Checking…', 'Contacting the Drone Hive AI server.'],
@@ -218,10 +223,11 @@ export class SettingsModal {
 
     const keyRows = providers.length
       ? providers
+          .filter((p) => p.configured || p.id !== 'openai-compatible')
           .map(
             (p) => `<div class="key-row">
               <span class="key-name">${icon('key', { size: 15 })}${escapeHtml(p.name)}</span>
-              <span class="chip ${p.configured ? 'chip-ok' : ''}">${p.configured ? 'Key set on server' : 'Not set'}</span>
+              <span class="key-chips">${p.configured && p.capabilities?.vision ? `<span class="chip">${icon('image', { size: 13 })}Images</span>` : ''}<span class="chip ${p.configured ? 'chip-ok' : ''}">${p.configured ? 'Key set on server' : 'Not set'}</span></span>
             </div>`,
           )
           .join('')
@@ -237,40 +243,58 @@ export class SettingsModal {
         <button type="button" class="btn btn-sm btn-secondary" data-action="refresh">${icon('refresh', { size: 14 })}<span>Check again</span></button>
       </div>
 
+      ${this.#usageCard()}
+
       <div class="group">
-        <div class="group-label">Provider & model</div>
+        <div class="group-label">AI selection</div>
         <label class="row">
-          <span class="row-text"><span class="row-title">AI provider</span><span class="row-sub">Only providers with a key on the server can be selected.</span></span>
+          <span class="row-text"><span class="row-title">Mode</span><span class="row-sub">${
+            choice === 'automatic' ? AI_MODES.automatic.description + '.' : choice === 'default' ? 'Uses the standard provider, with automatic backup if it’s busy.' : 'Always uses this provider. If it’s unavailable, you’ll be told instead of switched.'
+          }</span></span>
           <select class="input input-sm" data-setting="provider" ${configured.length ? '' : 'disabled'}>
-            <option value="auto" ${s.provider === 'auto' ? 'selected' : ''}>Automatic</option>
-            ${providers
-              .map((p) => `<option value="${p.id}" ${p.id === s.provider ? 'selected' : ''} ${p.configured ? '' : 'disabled'}>${escapeHtml(p.name)}${p.configured ? '' : ' — needs key'}</option>`)
-              .join('')}
+            <optgroup label="Mode">
+              <option value="default" ${choice === 'default' ? 'selected' : ''}>Default</option>
+              <option value="automatic" ${choice === 'automatic' ? 'selected' : ''}>Automatic</option>
+            </optgroup>
+            <optgroup label="Always use">
+              ${providers
+                .filter((p) => p.configured || p.id !== 'openai-compatible')
+                .map((p) => `<option value="${p.id}" ${p.id === choice ? 'selected' : ''} ${p.configured ? '' : 'disabled'}>${escapeHtml(p.name)}${p.configured ? '' : ' — needs key'}</option>`)
+                .join('')}
+            </optgroup>
           </select>
         </label>
-        <label class="row">
-          <span class="row-text"><span class="row-title">Model</span><span class="row-sub">Models allowed by the server for this provider.</span></span>
-          <select class="input input-sm" data-setting="model" ${models.length ? '' : 'disabled'}>
-            ${models.length ? models.map((m) => `<option value="${escapeHtml(m)}" ${m === model ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('') : '<option>Connect a provider first</option>'}
-          </select>
-        </label>
+        ${
+          choice === 'automatic'
+            ? `<div class="auto-explainer">
+                <p>${icon('sparkle', { size: 15 })}<span>Each message is checked first (coding, reasoning, images, length). Drone Hive AI then picks the first suitable AI in this order, and moves to the next one only if it’s busy or down:</span></p>
+                <ol class="auto-order">${order
+                  .map(
+                    (p, i) => `<li class="${p.configured ? '' : 'is-off'}"><span class="auto-rank">${i + 1}</span><span class="auto-name">${escapeHtml(p.name)}</span>${
+                      p.configured ? (p.capabilities?.vision ? '<span class="chip">Text + images</span>' : '<span class="chip">Text</span>') : '<span class="chip">Not connected</span>'
+                    }</li>`,
+                  )
+                  .join('')}</ol>
+              </div>`
+            : `<label class="row">
+                <span class="row-text"><span class="row-title">Model</span><span class="row-sub">${modelProvider ? `Models allowed by the server for ${escapeHtml(modelProvider.name)}.` : 'Connect a provider first.'}</span></span>
+                <select class="input input-sm" data-setting="model" ${models.length ? '' : 'disabled'}>
+                  ${models.length ? models.map((m) => `<option value="${escapeHtml(m)}" ${m === model ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('') : '<option>Connect a provider first</option>'}
+                </select>
+              </label>`
+        }
       </div>
 
       <div class="group">
-        <div class="group-label">API key</div>
+        <div class="group-label">API keys</div>
         <p class="group-note">${icon('shield', { size: 15 })}<span>For security, API keys are <b>never</b> entered or stored in the browser. They live in the server's environment variables, where visitors can't see them.</span></p>
-        <div class="key-box">
-          <input class="input input-sm" type="password" disabled placeholder="Stored on the server — not editable here" aria-label="API key (managed on the server)">
-          ${keyRows}
-        </div>
+        <div class="key-box">${keyRows}</div>
         <details class="howto">
-          <summary>How to add your API key</summary>
+          <summary>How to add an API key</summary>
           <ol>
-            <li><b>On Netlify:</b> Project (or Site) configuration → Environment variables → Add a variable. Name it <code>GROQ_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>OLLAMA_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> (scope must include Functions), paste your key, then redeploy.</li>
-            <li><b>On your PC:</b> copy <code>.env.example</code> to <code>.env</code>, set your key (e.g. <code>GROQ_API_KEY=…</code>), and restart <code>npm start</code>.</li>
-            <li><b>Groq (free):</b> create a key at <code>console.groq.com/keys</code> and use the variable name <code>GROQ_API_KEY</code>.</li>
-            <li><b>OpenRouter (free models):</b> create a key at <code>openrouter.ai/keys</code> and use the variable name <code>OPENROUTER_API_KEY</code>. Only free models are used unless you set <code>OPENROUTER_ALLOW_PAID=true</code>.</li>
-            <li>Other providers: set the <code>OPENAI_COMPAT_*</code> variables (see the README).</li>
+            <li><b>On Netlify:</b> Project configuration → Environment variables → Add a variable (mark it as a secret, scope must include Functions), then redeploy. Names: <code>GEMINI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>OLLAMA_API_KEY</code>.</li>
+            <li><b>On your PC:</b> copy <code>.env.example</code> to <code>.env</code>, add the key, and restart <code>npm start</code>.</li>
+            <li><b>Free keys:</b> Gemini at <code>aistudio.google.com/apikey</code>, OpenRouter at <code>openrouter.ai/keys</code> (only free models are used), Groq at <code>console.groq.com/keys</code>, Ollama at <code>ollama.com</code> → Settings → Keys.</li>
           </ol>
         </details>
         ${status?.accessCodeRequired || s.accessCode ? `
@@ -303,8 +327,28 @@ export class SettingsModal {
       <div class="group">
         <div class="group-label">Custom instructions</div>
         <p class="group-note">${icon('info', { size: 15 })}<span>Added to every conversation, on top of Drone Hive AI's built-in personality. Example: “I mostly code in JavaScript. Keep answers short.”</span></p>
-        <textarea class="input textarea" rows="4" maxlength="4000" placeholder="Tell Drone Hive AI how to respond…" data-setting="customInstructions" data-kind="text" ${status && status.customInstructionsAllowed === false ? 'disabled' : ''}>${escapeHtml(s.customInstructions)}</textarea>
+        <textarea class="input textarea" rows="4" maxlength="${status?.limits?.maxCustomInstructionChars || 2000}" placeholder="Tell Drone Hive AI how to respond…" data-setting="customInstructions" data-kind="text" ${status && status.customInstructionsAllowed === false ? 'disabled' : ''}>${escapeHtml(s.customInstructions)}</textarea>
       </div>`;
+  }
+
+  /** Today's usage, as last reported by the server (limits are enforced there). */
+  #usageCard() {
+    const q = this.getQuota();
+    if (!q) {
+      return `<div class="usage-card is-empty">${icon('gauge', { size: 17 })}<span>Your daily usage appears here after your first message. Limits are set and enforced by the server.</span></div>`;
+    }
+    const pct = (a, b) => Math.min(100, Math.round((a / Math.max(1, b)) * 100));
+    const reset = new Date(q.resetAt);
+    const resetText = Number.isNaN(reset.getTime()) ? '' : `Resets ${reset.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
+    const bar = (label, used, limit, p) => `<div class="usage-row">
+        <div class="usage-top"><span>${label}</span><span>${used.toLocaleString()} / ${limit.toLocaleString()}</span></div>
+        <div class="usage-bar ${p >= 90 ? 'is-high' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}" aria-label="${label}"><span data-pct="${p}"></span></div>
+      </div>`;
+    return `<div class="usage-card">
+      <div class="usage-head"><b>${icon('gauge', { size: 16 })}Today’s usage</b><span>${escapeHtml(resetText)}</span></div>
+      ${bar('Messages', q.requestsUsed, q.requestsLimit, pct(q.requestsUsed, q.requestsLimit))}
+      ${bar('AI tokens', q.tokensUsed, q.tokensLimit, pct(q.tokensUsed, q.tokensLimit))}
+    </div>`;
   }
 
   #data() {
@@ -324,7 +368,7 @@ export class SettingsModal {
         <div class="group-label">Local storage</div>
         <p class="group-note">${icon('database', { size: 15 })}<span>${
           st.persistent
-            ? 'Conversations and settings are saved in this browser’s local storage. They are not uploaded anywhere. Only the messages you send are passed through the server to the AI provider to generate replies. Clearing your browser data or using another device will not show these chats.'
+            ? 'Conversations, settings and attached images are saved only in this browser. They are not stored on the Drone Hive server. Only the messages (and images) you send are passed through the server to the AI provider to generate a reply. Images are shrunk and cleaned of hidden data such as GPS location before sending. Clearing your browser data or using another device will not show these chats.'
             : 'Your browser is blocking local storage (for example in private mode), so conversations will be lost when this tab closes.'
         }</span></p>
       </div>
@@ -332,7 +376,7 @@ export class SettingsModal {
       <div class="group">
         <div class="group-label">Export</div>
         <div class="row">
-          <span class="row-text"><span class="row-title">Export all conversations</span><span class="row-sub">Download everything as a JSON file.</span></span>
+          <span class="row-text"><span class="row-title">Export all conversations</span><span class="row-sub">Download everything as a JSON file (attached images aren’t included).</span></span>
           <button type="button" class="btn btn-sm btn-secondary" data-action="export" ${st.conversations ? '' : 'disabled'}>${icon('download', { size: 14 })}<span>Export</span></button>
         </div>
       </div>

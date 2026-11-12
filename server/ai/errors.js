@@ -15,7 +15,14 @@ export class AIError extends Error {
   }
 
   toJSON() {
-    return { code: this.code, message: this.message };
+    // Only safe, user-facing fields. Never `details`.
+    return { code: this.code, message: this.message, ...(this.extra || {}) };
+  }
+
+  /** Attach safe extra fields for the browser (e.g. { resetAt }). */
+  with(extra) {
+    this.extra = { ...(this.extra || {}), ...extra };
+    return this;
   }
 }
 
@@ -35,6 +42,13 @@ export const ERROR_CODES = {
   PROVIDER_UNAVAILABLE: 'PROVIDER_UNAVAILABLE',
   PROVIDER_ERROR: 'PROVIDER_ERROR',
   ABORTED: 'ABORTED',
+  INVALID_IMAGE: 'INVALID_IMAGE',
+  VISION_UNSUPPORTED: 'VISION_UNSUPPORTED',
+  USAGE_LIMIT: 'USAGE_LIMIT',
+  GLOBAL_LIMIT: 'GLOBAL_LIMIT',
+  SERVICE_PAUSED: 'SERVICE_PAUSED',
+  DUPLICATE_REQUEST: 'DUPLICATE_REQUEST',
+  ALL_PROVIDERS_FAILED: 'ALL_PROVIDERS_FAILED',
 };
 
 /** Extracts a short, safe error message from a provider's error body. */
@@ -72,12 +86,13 @@ export async function errorFromProviderResponse(res, providerName) {
     return new AIError(ERROR_CODES.MODEL_NOT_FOUND, `${providerName} could not find that model. Pick another model in Settings.`, 502, detail);
   }
   if (s === 400 || s === 413 || s === 422) {
-    return new AIError(ERROR_CODES.PROVIDER_BAD_REQUEST, `${providerName} rejected the request: ${detail || 'bad request'}`, 502, detail);
+    // The provider's own wording stays in the server log only.
+    return new AIError(ERROR_CODES.PROVIDER_BAD_REQUEST, `${providerName} couldn’t process this request. Try rephrasing it or starting a new chat.`, 502, detail);
   }
   if (s >= 500) {
-    return new AIError(ERROR_CODES.PROVIDER_UNAVAILABLE, `${providerName} is temporarily unavailable (HTTP ${s}). Try again in a moment.`, 503, detail);
+    return new AIError(ERROR_CODES.PROVIDER_UNAVAILABLE, `${providerName} is temporarily unavailable. Try again in a moment.`, 503, detail);
   }
-  return new AIError(ERROR_CODES.PROVIDER_ERROR, `${providerName} returned HTTP ${s}.`, 502, detail);
+  return new AIError(ERROR_CODES.PROVIDER_ERROR, `${providerName} had a problem answering. Try again in a moment.`, 502, detail);
 }
 
 /** Normalizes anything thrown into an AIError. */
@@ -86,4 +101,56 @@ export function toAIError(err) {
   if (err?.name === 'AbortError') return new AIError(ERROR_CODES.ABORTED, 'The request was cancelled.', 499);
   if (err?.name === 'TimeoutError') return new AIError(ERROR_CODES.PROVIDER_UNAVAILABLE, 'The reply took too long and was stopped.', 504);
   return new AIError(ERROR_CODES.PROVIDER_ERROR, 'Could not reach the AI provider. Please try again.', 502, String(err?.message || err).slice(0, 200));
+}
+
+/** Error thrown when a provider's stream reports an error mid-way. Raw text stays server-side. */
+export function streamError(providerName, raw) {
+  return new AIError(ERROR_CODES.PROVIDER_ERROR, `${providerName} had a problem while answering. Try again.`, 502, String(raw || '').slice(0, 300));
+}
+
+/** Errors that mean "this provider can't answer right now — try another one". */
+export function isFallbackError(err) {
+  if (!(err instanceof AIError)) return true; // network failure etc.
+  return [
+    ERROR_CODES.PROVIDER_UNAVAILABLE,
+    ERROR_CODES.RATE_LIMITED,
+    ERROR_CODES.PROVIDER_AUTH,
+    ERROR_CODES.MODEL_NOT_FOUND,
+    ERROR_CODES.PROVIDER_BAD_REQUEST,
+    ERROR_CODES.PROVIDER_ERROR,
+    ERROR_CODES.PROVIDER_NOT_CONFIGURED,
+    ERROR_CODES.VISION_UNSUPPORTED,
+  ].includes(err.code);
+}
+
+// ── Credential redaction for logs ───────────────────────────────────────────
+const SECRET_ENV = ['GEMINI_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY', 'OLLAMA_API_KEY', 'ANTHROPIC_API_KEY', 'DRONEHIVE_ACCESS_CODE', 'FIREBASE_PRIVATE_KEY', 'NETLIFY_AI_GATEWAY_KEY'];
+const KEY_PATTERNS = [
+  /\bsk-or-[A-Za-z0-9_-]{8,}/g, // OpenRouter
+  /\bsk-ant-[A-Za-z0-9_-]{8,}/g, // Anthropic
+  /\bsk-[A-Za-z0-9_-]{16,}/g, // OpenAI-style
+  /\bgsk_[A-Za-z0-9]{8,}/g, // Groq
+  /\bAIza[0-9A-Za-z_-]{20,}/g, // Google
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g,
+  /\b(Bearer)\s+[A-Za-z0-9._~+/-]{12,}=*/gi,
+];
+
+/**
+ * Removes anything that looks like an API key, token or private key before
+ * text is written to the server log. Provider error messages sometimes echo
+ * part of the key; this makes sure it never ends up in logs.
+ */
+export function redact(text) {
+  let out = String(text ?? '');
+  for (const name of SECRET_ENV) {
+    let v;
+    try {
+      v = globalThis.Netlify?.env?.get?.(name) || globalThis.process?.env?.[name];
+    } catch {
+      v = undefined;
+    }
+    if (typeof v === 'string' && v.trim().length >= 6) out = out.split(v.trim()).join('[redacted]');
+  }
+  for (const re of KEY_PATTERNS) out = out.replace(re, (m, p1) => (/^bearer$/i.test(p1 || '') ? `${p1} [redacted]` : '[redacted]'));
+  return out;
 }
