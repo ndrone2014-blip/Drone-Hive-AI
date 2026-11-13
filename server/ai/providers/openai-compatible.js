@@ -57,11 +57,11 @@ export const openAICompatibleProvider = {
  * normalized event iterator. Used by every OpenAI-format provider
  * (Gemini, Groq, OpenRouter, Ollama, custom).
  */
-export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal, extraHeaders, extraBody, includeUsage = false }) {
+export async function openChatCompletions({ baseUrl, apiKey, providerName, model, system, messages, maxTokens, temperature, signal, extraHeaders, extraBody, includeUsage = false, mapMessage = toOpenAIMessage }) {
   const body = {
     ...(extraBody || {}),
     model,
-    messages: [{ role: 'system', content: system }, ...messages.map(toOpenAIMessage)],
+    messages: [{ role: 'system', content: system }, ...messages.map(mapMessage)],
     max_tokens: maxTokens,
     stream: true,
   };
@@ -87,6 +87,17 @@ export function toOpenAIMessage(m) {
   };
 }
 
+/**
+ * Reply text from a streamed delta. Usually a string; reasoning models (e.g.
+ * Mistral's) send an array of parts instead, where "thinking" parts are
+ * private reasoning and only "text" parts are the answer.
+ */
+export function deltaText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((p) => (typeof p === 'string' ? p : p?.type === 'text' && typeof p.text === 'string' ? p.text : '')).join('');
+}
+
 async function* streamEvents(body, providerName) {
   let stopReason = null;
   let usage = {};
@@ -100,7 +111,7 @@ async function* streamEvents(body, providerName) {
     }
     if (json.error) throw streamError(providerName, json.error.message || JSON.stringify(json.error));
     const choice = json.choices?.[0];
-    const text = choice?.delta?.content;
+    const text = deltaText(choice?.delta?.content);
     if (text) yield { type: 'delta', text };
     if (choice?.finish_reason) stopReason = choice.finish_reason;
     if (json.usage) usage = { inputTokens: json.usage.prompt_tokens, outputTokens: json.usage.completion_tokens };

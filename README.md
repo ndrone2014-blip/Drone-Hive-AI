@@ -10,7 +10,7 @@ An AI assistant by **Drone Hive Studios**, built for code, ideas and writing.
 - **Free to run.** It runs on Netlify's free plan using Edge Functions, with no paid add-ons.
 - **Works before an AI is connected.** Chats, history, search and settings all work. Until you add a key, the app clearly says that no AI is connected, and it never makes up replies.
 - **API keys stay on the server.** Keys are never sent to the browser.
-- **Smart AI selection.** *Automatic* mode picks the best available AI for each message (Google Gemini → OpenRouter → Groq → Ollama) and switches if one is busy.
+- **Smart AI selection.** *Automatic* — the standard mode for everyone — picks the best available AI for each message (Google Gemini, Vibe AI (Mistral AI), OpenRouter, Groq, Ollama) and switches if one is busy.
 - **Reads images.** Attach screenshots or photos; they're sent to an AI that can see them.
 - **Installable.** Add it to your phone's Home Screen and it opens like an app, with the Drone Hive logo.
 - **Protected.** Sign-in, server-side usage limits (per minute, hour and day, per user and for everyone) and an emergency stop.
@@ -30,8 +30,8 @@ Tap the AI button in the top-right corner of the chat.
 
 | Mode | What it does |
 |---|---|
+| **Automatic** *(standard for everyone)* | Looks at each message first and sends it to the best-suited connected AI: **code** → Vibe AI (Codestral) then Gemini · **images** → Gemini then Vibe AI · **reasoning / long** → Gemini then Vibe AI · **quick chat** → Gemini Flash-Lite then Groq. Backup order: **Google Gemini → Vibe AI (Mistral AI) → OpenRouter → Groq → Ollama**, then any other connected provider. It stays with the AI that answered the previous message when that's still one of the two best fits, so it doesn't switch for no reason. |
 | **Default** | Uses the server's standard provider (`AI_PROVIDER`). If it's busy or down *before* it starts answering, the next provider takes over (turn off with `AI_DEFAULT_FALLBACK=false`). |
-| **Automatic** | Looks at each message first — coding? reasoning? images? long? — then uses the first suitable AI in this order: **Google Gemini → OpenRouter → Groq → Ollama** (final fallback). It also picks a fitting model, e.g. Gemini Flash for coding and Flash-Lite for quick chat, or a code model on OpenRouter for code. |
 | **Always use …** | One specific provider. If it's unavailable you get a clear message instead of being switched. |
 
 How it stays safe and honest:
@@ -141,7 +141,18 @@ API keys **only** go in server environment variables. Never put them in any file
 ### Google Gemini (recommended, free tier)
 
 1. Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-2. Add the environment variable `GEMINI_API_KEY` (mark it as a secret, scope must include Functions), then redeploy.
+2. Add the environment variable `GEMINI_API_KEY` **or** `GOOGLE_API_KEY` (mark it as a secret, scope must include Functions **and** all deploy contexts), then redeploy.
+
+> **Why Gemini said "Please pass a valid API key":** when a site has no Gemini key of its own, Netlify's AI Gateway fills in `GEMINI_API_KEY` with a *placeholder* that only works through its paid gateway. Drone Hive AI was sending that placeholder straight to Google. It now ignores it, and **Settings → AI Configuration** shows *"Needs your own key"*. `GOOGLE_API_KEY` is the safest name on Netlify: when it's set, Netlify doesn't add a Gemini placeholder at all.
+
+### Vibe AI (Mistral AI) (free "Experiment" plan)
+
+Vibe AI and Mistral AI are the same provider here — one key, one entry.
+
+1. Create a key at [console.mistral.ai/api-keys](https://console.mistral.ai/api-keys) (the free Experiment plan needs no card; check Mistral's site for its current free limits).
+2. Add the environment variable `MISTRAL_API_KEY` (secret, scope includes Functions), then redeploy.
+
+Default models: `mistral-medium-latest` (main, reads images), `mistral-small-latest` (fast, reads images) and `codestral-latest` (code). Change them with `MISTRAL_MODEL` / `MISTRAL_MODELS` / `MISTRAL_VISION_MODELS`.
 
 Already connected Gemini through the `OPENAI_COMPAT_*` variables pointing at `generativelanguage.googleapis.com`? That keeps working — it's detected automatically and shown as **Google Gemini**.
 
@@ -180,7 +191,7 @@ Running Ollama on your own PC instead? Set `OLLAMA_BASE_URL=http://localhost:114
 2. Add the environment variable `GROQ_API_KEY` with that key (mark it as a secret on Netlify, scope must include Functions). Use the same Netlify steps as above, or put it in `.env` on your PC.
 3. Redeploy. The default model is `openai/gpt-oss-120b`; `llama-3.3-70b-versatile` and `openai/gpt-oss-20b` are also listed. To change them, set `GROQ_MODEL` / `GROQ_MODELS` with exact IDs from [console.groq.com/docs/models](https://console.groq.com/docs/models).
 
-`AI_PROVIDER` chooses the provider for **Default** mode (e.g. `AI_PROVIDER=groq`). With `auto`, the first connected one in the order Gemini → OpenRouter → Groq → Ollama is used.
+`AI_PROVIDER` chooses the provider for **Default** mode (e.g. `AI_PROVIDER=groq`). With `auto`, the first connected one in the order Gemini → Vibe AI (Mistral) → OpenRouter → Groq → Ollama is used.
 
 > The free plan has per-minute and per-day limits. When they're hit, the app shows a "try again shortly" message instead of charging anything.
 
@@ -248,11 +259,11 @@ Built in, no setup needed. **Everything is enforced on the server** — nothing 
 |---|---|
 | Netlify rate limit (10 chats/min per IP, enforced by Netlify) | Bots hammering the API |
 | Sign-in with a verified email (Firebase) | Scripts and throwaway bot accounts |
-| Per-user limits: 6 messages/min, 30/hour, 100/day, 150k tokens/day — per account **and** per IP (3×) | One person draining your AI usage, or farming accounts |
+| Per-user limits: 6 messages/min, 30/hour, **100 messages/day**, **25,000 tokens/day, 100,000/week, 300,000/month** — per account **and** per IP (3×). Every AI and every mode counts toward the same totals, so switching providers can't get around them | One person draining your AI usage, or farming accounts |
 | Global daily limit for everyone (1,500 messages / 3M tokens by default) | A sudden flood using up your free tiers |
 | Emergency stop (`AI_EMERGENCY_STOP`, or one switch in Firestore) | Anything unexpected — pauses all AI replies |
 | Max 2 replies in progress per user; duplicate submissions refused | Rapid repeat requests built to burn credits |
-| Max 2,048 tokens per reply, ~12k tokens per request, 16k characters per message, 4 images, 2-minute reply cap | Single huge or endless requests |
+| Replies up to **8,000 tokens (Medium, the standard)** or 2,000 (Short, in Settings), never more than what's left of the allowance; ~12k tokens per request, 16k characters per message, 4 images, 2-minute reply cap | Single huge or endless requests |
 | Same-origin check + no cookies (Bearer token) | Other websites using your AI / CSRF |
 | Strict Content-Security-Policy + safe Markdown renderer | Injected scripts (XSS) |
 | API keys only on the server; provider errors never sent to browsers; keys scrubbed from logs | Key / info leaks |
@@ -284,7 +295,7 @@ Out of the box, usage counters live in memory on each Netlify edge server, so th
    ```
 5. **Deploys → Trigger deploy.** Then delete the downloaded JSON file.
 
-Each message uses about 6 tiny Firestore writes; the free plan allows 20,000 writes a day (~3,000 messages). Counters are stored under hashed IDs — no emails or IP addresses are saved. The same database also holds [account memories](#-memory) (`memories` collection) once sign-in is on. Optional: add a TTL policy on the `expireAt` field of the `usage` collection to auto-delete old counters.
+Each message uses about 14 tiny Firestore writes (daily, weekly and monthly counters); the free plan allows 20,000 writes a day (~1,400 messages). Counters are stored under hashed IDs — no emails or IP addresses are saved. The same database also holds [account memories](#-memory) (`memories` collection) once sign-in is on. Optional: add a TTL policy on the `expireAt` field of the `usage` collection to auto-delete old counters.
 
 **Admin controls without redeploying:** create the document `config/limits` in Firestore and add any of these fields. They apply within ~30 seconds:
 
@@ -292,7 +303,7 @@ Each message uses about 6 tiny Firestore writes; the free plan allows 20,000 wri
 |---|---|---|
 | `emergencyStop` | boolean | `true` pauses all AI replies |
 | `globalDailyRequests` / `globalDailyTokens` | number | Daily limit for everyone |
-| `dailyRequestsPerUser` / `dailyTokensPerUser` / `hourlyRequestsPerUser` | number | Per-user limits |
+| `dailyRequestsPerUser` / `dailyTokensPerUser` / `weeklyTokensPerUser` / `monthlyTokensPerUser` / `hourlyRequestsPerUser` | number | Per-user limits |
 
 ### Lock the AI with an access code (strongly recommended)
 
@@ -381,6 +392,8 @@ Drone-Hive-AI/
 │           ├── index.js        provider registry + priority order
 │           ├── gemini.js
 │           ├── anthropic.js
+│           ├── mistral.js      Vibe AI (Mistral AI)
+│           ├── keys.js         reads API keys, ignores Netlify AI Gateway placeholders
 │           ├── groq.js
 │           ├── ollama.js
 │           ├── openrouter.js
@@ -418,7 +431,7 @@ Request body for `/api/chat`:
   ] }],
   "provider": "automatic",
   "model": "gemini-flash-latest",
-  "options": { "temperature": 0.7, "maxTokens": 2048, "customInstructions": "Be brief." },
+  "options": { "temperature": 0.7, "responseLength": "medium", "lastProvider": "gemini", "customInstructions": "Be brief." },
   "memory": { "enabled": true, "auto": true, "items": [{ "id": "…", "text": "Prefers TypeScript", "category": "tech" }], "recent": ["Nexora slash commands"] },
   "stream": true
 }

@@ -1,11 +1,16 @@
 import { getEnv, getEnvList } from '../../env.js';
 import { AIError, ERROR_CODES } from '../errors.js';
 import { openChatCompletions, isGeminiCompatUrl } from './openai-compatible.js';
+import { readProviderKey, cleanKey } from './keys.js';
 
 /**
  * Google Gemini provider (Gemini API, free tier available).
  *
- *  - Get a key at https://aistudio.google.com/apikey and set GEMINI_API_KEY.
+ *  - Get a key at https://aistudio.google.com/apikey and set GEMINI_API_KEY
+ *    (GOOGLE_API_KEY also works — on Netlify it's the safer name, because
+ *    Netlify's AI Gateway never puts a placeholder in it).
+ *  - A placeholder GEMINI_API_KEY added by Netlify's AI Gateway is ignored
+ *    (see keys.js): it was the cause of "Please pass a valid API key".
  *  - ALSO works with no new variables if Gemini was already set up through the
  *    OpenAI-compatible slot (OPENAI_COMPAT_BASE_URL pointing at
  *    generativelanguage.googleapis.com) — it reuses that key and model list.
@@ -25,13 +30,21 @@ export const geminiProvider = {
 
   getConfig() {
     const compatIsGemini = isGeminiCompatUrl(getEnv('OPENAI_COMPAT_BASE_URL'));
-    const apiKey = getEnv('GEMINI_API_KEY') || (compatIsGemini ? getEnv('OPENAI_COMPAT_API_KEY') : undefined);
+    const found = readProviderKey(['GEMINI_API_KEY', 'GOOGLE_API_KEY'], {
+      injectedVar: 'GEMINI_API_KEY',
+      baseUrlVar: 'GOOGLE_GEMINI_BASE_URL',
+      officialHost: /^https:\/\/generativelanguage\.googleapis\.com(\/|$)/i,
+    });
+    const compatKey = compatIsGemini ? cleanKey(getEnv('OPENAI_COMPAT_API_KEY')) : undefined;
+    const apiKey = found.apiKey || compatKey;
     const listed = getEnvList('GEMINI_MODELS') || (compatIsGemini && getEnvList('OPENAI_COMPAT_MODELS')) || DEFAULT_MODELS;
     const defaultModel = getEnv('GEMINI_MODEL') || (compatIsGemini && getEnv('OPENAI_COMPAT_MODEL')) || listed[0];
     const models = [...new Set([defaultModel, ...listed])];
     const vision = getEnvList('GEMINI_VISION_MODELS');
     return {
       configured: Boolean(apiKey),
+      // Why it isn't connected (shown in Settings, never includes the key).
+      issue: apiKey ? null : found.issue,
       apiKey,
       baseUrl: BASE_URL,
       models,
@@ -44,7 +57,15 @@ export const geminiProvider = {
 
   async open({ model, system, messages, maxTokens, temperature, signal }) {
     const cfg = this.getConfig();
-    if (!cfg.configured) throw new AIError(ERROR_CODES.PROVIDER_NOT_CONFIGURED, 'Gemini API key is not set (GEMINI_API_KEY).', 503);
+    if (!cfg.configured) {
+      throw new AIError(
+        ERROR_CODES.PROVIDER_NOT_CONFIGURED,
+        cfg.issue === 'gateway-placeholder'
+          ? 'Google Gemini needs your own API key. The GEMINI_API_KEY on this site is a Netlify AI Gateway placeholder, which Google rejects.'
+          : 'Gemini API key is not set (GEMINI_API_KEY).',
+        503,
+      );
+    }
     // Gemini "thinking" models count thinking toward the reply limit. Keep it
     // light so short limits still leave room for the actual answer.
     const effort = getEnv('GEMINI_REASONING_EFFORT', /lite/i.test(model) ? '' : 'low');
@@ -57,6 +78,8 @@ export const geminiProvider = {
       maxTokens,
       temperature,
       signal,
+      // Real token counts for the usage limits.
+      includeUsage: true,
       // Set GEMINI_REASONING_EFFORT=off to send nothing.
       extraBody: effort && effort !== 'off' ? { reasoning_effort: effort } : undefined,
     });

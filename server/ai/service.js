@@ -29,6 +29,8 @@ export function getStatus() {
       name: p.name,
       shortName: p.shortName || p.name,
       configured: c.configured,
+      // Why a provider isn't connected (e.g. 'gateway-placeholder'). Never a key.
+      ...(c.configured || !c.issue ? {} : { issue: c.issue }),
       models: c.models,
       defaultModel: c.defaultModel || null,
       capabilities: { ...p.capabilities, vision: Boolean(c.configured && c.visionModels?.length) },
@@ -39,12 +41,14 @@ export function getStatus() {
     connected: Boolean(active),
     activeProvider: active?.id || null,
     providers,
-    modes: ['default', 'automatic'],
+    modes: ['automatic', 'default'],
+    defaultMode: 'automatic',
     automaticOrder: AUTO_ORDER,
     vision: providers.some((p) => p.capabilities.vision),
     accessCodeRequired: Boolean(cfg.accessCode),
     limits: {
       maxOutputTokens: cfg.maxOutputTokens,
+      responseLengths: cfg.responseLengths,
       maxInputTokens: cfg.maxInputTokens,
       maxMessageChars: cfg.limits.maxMessageChars,
       maxCustomInstructionChars: cfg.limits.maxCustomInstructionChars,
@@ -73,7 +77,11 @@ export function prepareChat(body, { budget = Infinity, memory = { enabled: false
   // Output cap: never above the server limit, and never above what's left of
   // this user's daily token allowance.
   const outputCeiling = Math.max(64, Math.min(cfg.maxOutputTokens, Number.isFinite(budget) ? budget : cfg.maxOutputTokens));
-  const maxTokens = clampInt(opts.maxTokens, 64, outputCeiling, outputCeiling);
+  // Reply length: "short" | "medium" | "long" (named presets), or a number.
+  // Without a choice, replies use the Medium length (AI_MEDIUM_RESPONSE_TOKENS).
+  const preset = typeof opts.responseLength === 'string' ? cfg.responseLengths[opts.responseLength] : undefined;
+  const wanted = preset ?? (opts.maxTokens != null ? opts.maxTokens : cfg.responseLengths.medium);
+  const maxTokens = clampInt(wanted, 64, outputCeiling, outputCeiling);
   const temperature = typeof opts.temperature === 'number' && Number.isFinite(opts.temperature)
     ? Math.min(1, Math.max(0, opts.temperature))
     : undefined;
@@ -95,7 +103,10 @@ export function prepareChat(body, { budget = Infinity, memory = { enabled: false
 
   // 5. Which providers to try, in order.
   const model = typeof body.model === 'string' ? body.model.slice(0, 120) : undefined;
-  const plan = planRoute({ modeValue: body.provider, model, messages });
+  // The provider that wrote the previous reply in this chat (a hint only, so
+  // Automatic doesn't switch AIs for no reason).
+  const lastProvider = typeof opts.lastProvider === 'string' && /^[a-z0-9-]{1,40}$/.test(opts.lastProvider) ? opts.lastProvider : undefined;
+  const plan = planRoute({ modeValue: body.provider, model, messages, lastProvider });
 
   const lastUserText = messages[messages.length - 1]?.content || '';
   return {

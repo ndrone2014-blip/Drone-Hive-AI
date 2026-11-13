@@ -95,6 +95,7 @@ test('anthropic provider streams deltas as NDJSON and sends the right request', 
   };
   const res = await handleChatRequest(
     chatReq({
+      provider: 'default',
       model: 'not-allowed-model',
       messages: [
         { role: 'assistant', content: 'leading assistant is dropped' },
@@ -176,7 +177,7 @@ test('ollama provider uses Ollama Cloud with only OLLAMA_API_KEY set', async () 
   };
   const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
   assert.equal(status.activeProvider, 'ollama');
-  const res = await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hi' }] }));
+  const res = await handleChatRequest(chatReq({ provider: 'default', messages: [{ role: 'user', content: 'hi' }] }));
   const events = await readNDJSON(res);
   assert.equal(sent.url, 'https://ollama.com/v1/chat/completions');
   assert.equal(sent.init.headers.authorization, 'Bearer ollama-key');
@@ -194,7 +195,7 @@ test('groq provider works with only GROQ_API_KEY set', async () => {
   const status = await (await handleStatusRequest(new Request('http://local/api/status'))).json();
   assert.equal(status.activeProvider, 'groq');
   assert.ok(!JSON.stringify(status).includes('gsk_test'), 'API key must never appear in /api/status');
-  const res = await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hi' }] }));
+  const res = await handleChatRequest(chatReq({ provider: 'default', messages: [{ role: 'user', content: 'hi' }] }));
   const events = await readNDJSON(res);
   assert.equal(sent.url, 'https://api.groq.com/openai/v1/chat/completions');
   assert.equal(sent.init.headers.authorization, 'Bearer gsk_test');
@@ -354,7 +355,7 @@ test('output tokens are capped and huge inputs are trimmed or rejected', async (
   };
   const r = await handleChatRequest(chatReq({ ...msg(), options: { maxTokens: 999999 } }));
   await r.text();
-  assert.equal(sent.max_tokens, 2048);
+  assert.equal(sent.max_tokens, 8000, 'never above the server ceiling (8,000 = Medium)');
 
   // Long history: oldest messages are dropped to fit the input budget
   const history = [];

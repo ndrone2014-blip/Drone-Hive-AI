@@ -9,12 +9,14 @@ import { technicalNote } from '../identity.js';
  * the next one if it can't.
  *
  * Modes (picked by the user in the model menu):
+ *   automatic  THE STANDARD MODE (used when a request doesn't name one). Looks
+ *              at the request (code? reasoning? images? length? quick chat?),
+ *              ranks the connected providers for that kind of request
+ *              (AUTO_PREFERENCES) and picks a fitting model. Backup order:
+ *              Google Gemini → Vibe AI (Mistral AI) → OpenRouter → Groq → Ollama.
  *   default    The server's standard provider (AI_PROVIDER). If it fails before
  *              answering, the other providers are tried in priority order
  *              (turn off with AI_DEFAULT_FALLBACK=false).
- *   automatic  Looks at the request (code? reasoning? images? length?) and picks
- *              the best-suited available provider and model, in this priority:
- *              Google Gemini → OpenRouter → Groq → Ollama (final fallback).
  *   <id>       A provider the user picked by hand. Only that provider is used.
  *
  * Rules:
@@ -26,10 +28,28 @@ import { technicalNote } from '../identity.js';
  *  - The provider that actually answered is the one reported to the browser.
  */
 
-export const AUTO_ORDER = ['gemini', 'openrouter', 'groq', 'ollama'];
-export const MODES = ['default', 'automatic'];
+export const AUTO_ORDER = ['gemini', 'mistral', 'openrouter', 'groq', 'ollama'];
+export const MODES = ['automatic', 'default'];
 
-const MAX_ATTEMPTS = 8; // 4 providers × 2 models
+/**
+ * Automatic mode: which provider suits each kind of request best (first =
+ * best). Only connected providers are used; the rest of AUTO_ORDER follows as
+ * backup, so every connected provider can still step in.
+ *   code       Vibe AI has Codestral, Mistral's coding model; Gemini Flash is strong too
+ *   vision     Gemini reads images best; Mistral Medium/Small also read images
+ *   reasoning  big general models first
+ *   long       Gemini's very long context first
+ *   chat       short, simple messages: Gemini Flash-Lite, then the very fast Groq
+ */
+export const AUTO_PREFERENCES = {
+  code: ['mistral', 'gemini', 'groq', 'openrouter', 'ollama'],
+  vision: ['gemini', 'mistral', 'openrouter', 'groq', 'ollama'],
+  reasoning: ['gemini', 'mistral', 'openrouter', 'groq', 'ollama'],
+  long: ['gemini', 'mistral', 'openrouter', 'groq', 'ollama'],
+  chat: ['gemini', 'groq', 'mistral', 'openrouter', 'ollama'],
+};
+
+const MAX_ATTEMPTS = 10; // 5 providers × 2 models
 const MODELS_PER_PROVIDER = 2;
 
 // ── Cooldowns (per edge server, in memory) ───────────────────────────────────
@@ -64,9 +84,9 @@ export function analyzeRequest(messages) {
   const reasoning = REASONING_RE.test(text);
   const images = messages.reduce((n, m) => n + (m.images?.length || 0), 0);
   const long = text.length > 700 || messages.length > 8;
-  const kind = images ? 'vision' : code ? 'code' : reasoning ? 'reasoning' : 'chat';
+  const kind = images ? 'vision' : code ? 'code' : reasoning ? 'reasoning' : long ? 'long' : 'chat';
   const complex = code || reasoning || long || images > 0;
-  return { kind, complex, needsVision: images > 0, images };
+  return { kind, complex, long, needsVision: images > 0, images };
 }
 
 // ── Model ordering ───────────────────────────────────────────────────────────
@@ -101,8 +121,11 @@ export function orderModels(cfg, profile, preferred) {
 /** Normalizes the mode/provider value sent by the browser. */
 export function parseMode(value) {
   const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  if (!v || v === 'default' || v === 'auto') return { mode: 'default' }; // 'auto' = legacy name for default
-  if (v === 'automatic' || v === 'smart') return { mode: 'automatic' };
+  // Automatic is the standard mode: a request that doesn't say otherwise uses it.
+  if (!v || v === 'automatic' || v === 'smart') return { mode: 'automatic' };
+  if (v === 'default' || v === 'auto') return { mode: 'default' }; // 'auto' = legacy name for default
+  // Vibe AI and Mistral AI are one provider.
+  if (v === 'vibe' || v === 'vibe-ai' || v === 'mistral-ai') return { mode: 'manual', providerId: 'mistral' };
   return { mode: 'manual', providerId: v.slice(0, 40) };
 }
 
@@ -125,7 +148,7 @@ export function resolveDefaultProvider(preferred = getEnv('AI_PROVIDER', 'auto')
  * Builds the ordered list of { provider, models } to try. Pure (no network).
  * Throws an AIError if nothing can answer this request.
  */
-export function planRoute({ modeValue, model, messages }) {
+export function planRoute({ modeValue, model, messages, lastProvider }) {
   const { mode, providerId } = parseMode(modeValue);
   const profile = analyzeRequest(messages);
   const available = configured();
@@ -141,8 +164,14 @@ export function planRoute({ modeValue, model, messages }) {
     if (!models.length) return; // e.g. can't see images
     steps.push({ provider: entry.provider, cfg: entry.cfg, models });
   };
-  const autoOrder = () => {
-    const ids = AUTO_ORDER.filter((id) => byId.has(id));
+  const autoOrder = (kind) => {
+    const pref = AUTO_PREFERENCES[kind] || AUTO_ORDER;
+    // Any other connected provider (Anthropic, a custom OpenAI-compatible one)
+    // comes last, so Automatic always uses what's available.
+    let ids = [...new Set([...pref, ...AUTO_ORDER, ...available.map((x) => x.provider.id)])].filter((id) => byId.has(id));
+    // Avoid needless switching: if the AI that answered the previous message in
+    // this chat is one of the two best picks for this message too, keep it.
+    if (kind && lastProvider && ids.slice(0, 2).includes(lastProvider)) ids = [lastProvider, ...ids.filter((id) => id !== lastProvider)];
     // Providers on cooldown keep their relative order but go to the back.
     return [...ids.filter((id) => !isCooling(id, now)), ...ids.filter((id) => isCooling(id, now))];
   };
@@ -159,11 +188,11 @@ export function planRoute({ modeValue, model, messages }) {
       throw new AIError(ERROR_CODES.VISION_UNSUPPORTED, `${p.name} can’t read images with the current setup. Switch to Automatic (or Google Gemini) to send images.`, 400);
     }
   } else if (mode === 'automatic') {
-    for (const id of autoOrder()) add(byId.get(id));
+    for (const id of autoOrder(profile.kind)) add(byId.get(id));
   } else {
     const primary = byId.get(resolveDefaultProvider().id);
     add(primary, primary.cfg.models.includes(model) ? model : primary.cfg.defaultModel);
-    if (getEnv('AI_DEFAULT_FALLBACK', 'true') !== 'false') for (const id of autoOrder()) add(byId.get(id));
+    if (getEnv('AI_DEFAULT_FALLBACK', 'true') !== 'false') for (const id of autoOrder(null)) add(byId.get(id));
   }
 
   if (!steps.length) {

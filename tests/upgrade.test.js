@@ -71,7 +71,8 @@ test('Gemini is picked up from the existing OPENAI_COMPAT settings and listed fi
   assert.deepEqual(ids, ['gemini', 'openrouter', 'groq', 'ollama']);
   assert.equal(status.providers.find((p) => p.id === 'openai-compatible').configured, false, 'not listed twice');
   assert.equal(status.activeProvider, 'openrouter', 'Default mode keeps AI_PROVIDER');
-  assert.deepEqual(status.modes, ['default', 'automatic']);
+  assert.deepEqual(status.modes, ['automatic', 'default']);
+  assert.equal(status.defaultMode, 'automatic');
   assert.equal(status.vision, true);
   const raw = JSON.stringify(status);
   for (const secret of ['gem-key', 'sk-or-x', 'gsk_x', 'oll-x']) assert.ok(!raw.includes(secret), `${secret} leaked`);
@@ -110,22 +111,23 @@ test('Automatic mode falls back in priority order and remembers the busy provide
     const p = providerOf(url);
     calls.push(p);
     if (p === 'gemini') return new Response('{"error":{"message":"gem-internal-xyz"}}', { status: 429, headers: { 'retry-after': '30' } });
-    if (p === 'openrouter') return new Response('{"error":"down"}', { status: 503 });
-    return sse('from groq');
+    if (p === 'groq') return new Response('{"error":"down"}', { status: 503 });
+    return sse('from openrouter');
   };
   const events = await readNDJSON(await handleChatRequest(chatReq({ provider: 'automatic', messages: [{ role: 'user', content: 'hi' }] })));
-  // Gemini: both models tried (limits are per model), then OpenRouter, then Groq answers.
-  assert.deepEqual(calls, ['gemini', 'gemini', 'openrouter', 'openrouter', 'groq']);
+  // Quick chat ranks Gemini, then Groq. Each provider's two models are tried
+  // (free limits are per model), then the next provider answers.
+  assert.deepEqual(calls, ['gemini', 'gemini', 'groq', 'groq', 'openrouter']);
   const start = events.find((e) => e.type === 'start');
-  assert.equal(start.provider.id, 'groq');
+  assert.equal(start.provider.id, 'openrouter');
   assert.equal(start.rerouted, true);
-  assert.equal(text(events), 'from groq');
+  assert.equal(text(events), 'from openrouter');
   assert.ok(!JSON.stringify(events).includes('gem-internal-xyz'), 'provider errors are not shown to users');
 
-  // Next request: Gemini and OpenRouter are cooling down, so Groq is asked first.
+  // Next request: Gemini and Groq are cooling down, so OpenRouter is asked first.
   calls.length = 0;
   await (await handleChatRequest(chatReq({ provider: 'automatic', messages: [{ role: 'user', content: 'again' }] }))).text();
-  assert.equal(calls[0], 'groq');
+  assert.equal(calls[0], 'openrouter');
 });
 
 test('Ollama is the final fallback, and a clear message is shown if everything fails', async () => {
@@ -165,7 +167,7 @@ test('an empty reply counts as a failure and moves on', async () => {
     return providerOf(url) === 'gemini' ? new Response('data: [DONE]\n\n', { status: 200 }) : sse('ok');
   };
   const events = await readNDJSON(await handleChatRequest(chatReq({ provider: 'automatic', messages: [{ role: 'user', content: 'hi' }] })));
-  assert.equal(events.find((e) => e.type === 'start').provider.id, 'openrouter');
+  assert.equal(events.find((e) => e.type === 'start').provider.id, 'groq', 'next best for quick chat');
 });
 
 test('Default mode uses AI_PROVIDER first; manual mode never switches provider', async () => {

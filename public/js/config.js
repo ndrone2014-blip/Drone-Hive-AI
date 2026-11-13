@@ -4,7 +4,7 @@
 export const APP = {
   name: 'Drone Hive AI',
   shortName: 'Drone Hive',
-  version: '0.3.0',
+  version: '0.4.0',
   studio: 'Drone Hive Studios',
   credits: 'Developed by Drone Hive Studios | Developer @ndrone40',
   // Official company contact. Shown in Settings → About & contact. Links open
@@ -95,11 +95,11 @@ export const DEFAULT_SETTINGS = {
   enterToSend: true, // on phones Enter always adds a new line; use the send button
   autoScroll: true,
   // AI
-  provider: 'default', // 'default' | 'automatic' | a provider id (manual choice)
+  provider: 'automatic', // 'automatic' (standard) | 'default' | a provider id (manual choice)
   model: '',
   streamResponses: true,
   temperature: null, // null = provider default
-  maxTokens: null, // null = server default
+  responseLength: 'medium', // 'short' | 'medium' (Medium = the server's Medium Response Tokens, 8,000)
   customInstructions: '',
   accessCode: '',
   showProviderChip: false, // technical: label each reply with the AI provider/model that wrote it
@@ -111,6 +111,9 @@ export const DEFAULT_SETTINGS = {
 
 /** Labels for the AI mode picker. */
 export const AI_MODES = {
-  default: { label: 'Default', description: 'Drone Hive AI’s standard setup' },
-  automatic: { label: 'Automatic', description: 'Picks the best AI for each message' },
+  automatic: { label: 'Automatic', description: 'Picks the best AI for each message (recommended)' },
+  default: { label: 'Default', description: 'Uses the server’s standard AI' },
 };
+
+/** Settings format version. Bumped when a migration in settings-store.js is needed. */
+export const SETTINGS_VERSION = 2;

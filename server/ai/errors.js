@@ -57,8 +57,10 @@ export const ERROR_CODES = {
 /** Extracts a short, safe error message from a provider's error body. */
 function extractProviderMessage(text) {
   try {
-    const data = JSON.parse(text);
-    const msg = data?.error?.message || data?.message || data?.error;
+    let data = JSON.parse(text);
+    // Google's OpenAI-compatible endpoint wraps errors in an array: [{ error: {...} }]
+    if (Array.isArray(data)) data = data[0];
+    const msg = data?.error?.message || data?.message || data?.detail?.[0]?.msg || data?.error;
     if (typeof msg === 'string') return msg.slice(0, 300);
   } catch {
     /* not JSON */
@@ -76,7 +78,11 @@ export async function errorFromProviderResponse(res, providerName) {
   }
   const detail = extractProviderMessage(text);
   const s = res.status;
-  if (s === 401 || s === 403) {
+  // Some providers (Google Gemini) answer a bad or missing key with 400
+  // INVALID_ARGUMENT instead of 401. Treat it as the key problem it is, so the
+  // router skips this provider right away and the log says what's wrong.
+  const keyProblem = s === 400 && /api[ _-]?key|API_KEY_INVALID|unauthenticated|invalid authentication/i.test(`${detail} ${text.slice(0, 600)}`);
+  if (s === 401 || s === 403 || keyProblem) {
     return new AIError(ERROR_CODES.PROVIDER_AUTH, `${providerName} rejected the API key. Check that it is correct and active.`, 502, detail);
   }
   if (s === 402) {
@@ -127,7 +133,7 @@ export function isFallbackError(err) {
 }
 
 // ── Credential redaction for logs ───────────────────────────────────────────
-const SECRET_ENV = ['GEMINI_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY', 'OLLAMA_API_KEY', 'ANTHROPIC_API_KEY', 'DRONEHIVE_ACCESS_CODE', 'FIREBASE_PRIVATE_KEY', 'NETLIFY_AI_GATEWAY_KEY'];
+const SECRET_ENV = ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'MISTRAL_API_KEY', 'OPENAI_COMPAT_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY', 'OLLAMA_API_KEY', 'ANTHROPIC_API_KEY', 'DRONEHIVE_ACCESS_CODE', 'FIREBASE_PRIVATE_KEY', 'NETLIFY_AI_GATEWAY_KEY'];
 const KEY_PATTERNS = [
   /\bsk-or-[A-Za-z0-9_-]{8,}/g, // OpenRouter
   /\bsk-ant-[A-Za-z0-9_-]{8,}/g, // Anthropic

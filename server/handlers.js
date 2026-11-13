@@ -110,11 +110,20 @@ export async function handleChatRequest(req, info = {}) {
     // Validate first, so broken requests never count against anyone's usage.
     prep = prepareChat(body, { memory: await loadChatMemory(body.memory, user) });
     ticket = await beginUsage(keys, { fingerprint: await fingerprint(prep, prep.plan.mode) });
-    if (ticket.budget < 64) {
-      await ticket.finish(0);
-      throw new AIError(ERROR_CODES.USAGE_LIMIT, 'You’ve used today’s AI allowance. Your usage resets every day at midnight UTC.', 429).with({ resetAt: ticket.quota.resetAt });
+    // The request's input counts too, so the reply may only use what's left
+    // after it. This keeps the daily, weekly and monthly totals exact.
+    const outputRoom = ticket.budget - prep.inputTokensEstimate;
+    if (outputRoom < 64) {
+      await ticket.finish(0, { refund: true });
+      const when = { day: 'Your usage resets every day at midnight UTC.', week: 'Your weekly allowance resets every Monday at midnight UTC.', month: 'Your monthly allowance resets on the 1st at midnight UTC.' }[ticket.budgetPeriod];
+      const msg = ticket.budget < 64
+        ? `You’ve used your ${ticket.budgetPeriod === 'day' ? 'daily' : `${ticket.budgetPeriod}ly`} AI allowance. ${when}`
+        : `There isn’t enough of your ${ticket.budgetPeriod === 'day' ? 'daily' : `${ticket.budgetPeriod}ly`} AI allowance left for this message (about ${ticket.budget.toLocaleString('en-US')} tokens left). Start a new chat to send less history, or wait for the reset. ${when}`;
+      throw new AIError(ERROR_CODES.USAGE_LIMIT, msg, 429, undefined, {
+        'retry-after': String(Math.max(1, Math.ceil((Date.parse(ticket.budgetResetAt) - Date.now()) / 1000))),
+      }).with({ resetAt: ticket.budgetResetAt });
     }
-    prep.maxTokens = Math.max(64, Math.min(prep.maxTokens, ticket.budget));
+    prep.maxTokens = Math.max(64, Math.min(prep.maxTokens, outputRoom));
   } catch (err) {
     return errorResponse(err);
   }

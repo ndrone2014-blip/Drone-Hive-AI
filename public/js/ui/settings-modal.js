@@ -227,16 +227,16 @@ export class SettingsModal {
     const { state, status } = this.connection;
     const providers = status?.providers || [];
     const configured = providers.filter((p) => p.configured);
-    const choice = s.provider === 'automatic' || s.provider === 'default' || configured.some((p) => p.id === s.provider) ? s.provider : 'default';
+    const choice = s.provider === 'automatic' || s.provider === 'default' || configured.some((p) => p.id === s.provider) ? s.provider : 'automatic';
     const active = this.connection.activeProvider;
     const modelProvider = choice === 'default' ? active : choice === 'automatic' ? null : providers.find((p) => p.id === choice);
     const models = modelProvider?.models || [];
     const model = models.includes(s.model) ? s.model : modelProvider?.defaultModel || '';
-    const maxOut = status?.limits?.maxOutputTokens || 2048;
-    const order = (status?.automaticOrder || ['gemini', 'openrouter', 'groq', 'ollama']).map((id) => providers.find((p) => p.id === id)).filter(Boolean);
+    const lengths = status?.limits?.responseLengths || { short: 2000, medium: 8000 };
+    const order = (status?.automaticOrder || ['gemini', 'mistral', 'openrouter', 'groq', 'ollama']).map((id) => providers.find((p) => p.id === id)).filter(Boolean);
 
     const stateInfo = {
-      connected: ['Connected', `${configured.length} AI provider${configured.length === 1 ? '' : 's'} available. Default mode uses ${escapeHtml(active?.name || 'your standard provider')}.`],
+      connected: ['Connected', `${configured.length} AI provider${configured.length === 1 ? '' : 's'} available. Automatic picks the best one for each message.`],
       disconnected: ['Not connected', 'The server is running, but no AI provider API key has been added yet.'],
       offline: ['Server not reachable', 'The app is open, but its API server is not running at this address.'],
       checking: ['Checking…', 'Contacting the Drone Hive AI server.'],
@@ -248,7 +248,7 @@ export class SettingsModal {
           .map(
             (p) => `<div class="key-row">
               <span class="key-name">${icon('key', { size: 15 })}${escapeHtml(p.name)}</span>
-              <span class="key-chips">${p.configured && p.capabilities?.vision ? `<span class="chip">${icon('image', { size: 13 })}Images</span>` : ''}<span class="chip ${p.configured ? 'chip-ok' : ''}">${p.configured ? 'Key set on server' : 'Not set'}</span></span>
+              <span class="key-chips">${p.configured && p.capabilities?.vision ? `<span class="chip">${icon('image', { size: 13 })}Images</span>` : ''}<span class="chip ${p.configured ? 'chip-ok' : p.issue ? 'chip-warn' : ''}" ${p.issue === 'gateway-placeholder' ? 'title="Netlify added a placeholder key that only works through its paid AI Gateway. Add your own free key (see below)."' : ''}>${p.configured ? 'Key set on server' : p.issue === 'gateway-placeholder' ? 'Needs your own key' : 'Not set'}</span></span>
             </div>`,
           )
           .join('')
@@ -270,12 +270,12 @@ export class SettingsModal {
         <div class="group-label">AI selection</div>
         <label class="row">
           <span class="row-text"><span class="row-title">Mode</span><span class="row-sub">${
-            choice === 'automatic' ? AI_MODES.automatic.description + '.' : choice === 'default' ? 'Uses the standard provider, with automatic backup if it’s busy.' : 'Always uses this provider. If it’s unavailable, you’ll be told instead of switched.'
+            choice === 'automatic' ? 'Picks the best AI for each message. This is the standard mode.' : choice === 'default' ? 'Uses the standard provider, with automatic backup if it’s busy.' : 'Always uses this provider. If it’s unavailable, you’ll be told instead of switched.'
           }</span></span>
           <select class="input input-sm" data-setting="provider" ${configured.length ? '' : 'disabled'}>
             <optgroup label="Mode">
+              <option value="automatic" ${choice === 'automatic' ? 'selected' : ''}>Automatic (recommended)</option>
               <option value="default" ${choice === 'default' ? 'selected' : ''}>Default</option>
-              <option value="automatic" ${choice === 'automatic' ? 'selected' : ''}>Automatic</option>
             </optgroup>
             <optgroup label="Always use">
               ${providers
@@ -288,7 +288,7 @@ export class SettingsModal {
         ${
           choice === 'automatic'
             ? `<div class="auto-explainer">
-                <p>${icon('sparkle', { size: 15 })}<span>Each message is checked first (coding, reasoning, images, length). Drone Hive AI then picks the first suitable AI in this order, and moves to the next one only if it’s busy or down:</span></p>
+                <p>${icon('sparkle', { size: 15 })}<span>Each message is checked first — coding, reasoning, images, long or quick chat — and the best-suited connected AI answers it (for example Vibe AI for code, Google Gemini for images). It stays with the same AI during a chat when that still fits, and moves to the next one only if it’s busy or down. Backup order:</span></p>
                 <ol class="auto-order">${order
                   .map(
                     (p, i) => `<li class="${p.configured ? '' : 'is-off'}"><span class="auto-rank">${i + 1}</span><span class="auto-name">${escapeHtml(p.name)}</span>${
@@ -313,9 +313,9 @@ export class SettingsModal {
         <details class="howto">
           <summary>How to add an API key</summary>
           <ol>
-            <li><b>On Netlify:</b> Project configuration → Environment variables → Add a variable (mark it as a secret, scope must include Functions), then redeploy. Names: <code>GEMINI_API_KEY</code>, <code>OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>OLLAMA_API_KEY</code>.</li>
+            <li><b>On Netlify:</b> Project configuration → Environment variables → Add a variable (mark it as a secret, scope must include Functions), then redeploy. Names: <code>GEMINI_API_KEY</code> (or <code>GOOGLE_API_KEY</code>), <code>MISTRAL_API_KEY</code> (Vibe AI), <code>OPENROUTER_API_KEY</code>, <code>GROQ_API_KEY</code>, <code>OLLAMA_API_KEY</code>.</li>
             <li><b>On your PC:</b> copy <code>.env.example</code> to <code>.env</code>, add the key, and restart <code>npm start</code>.</li>
-            <li><b>Free keys:</b> Gemini at <code>aistudio.google.com/apikey</code>, OpenRouter at <code>openrouter.ai/keys</code> (only free models are used), Groq at <code>console.groq.com/keys</code>, Ollama at <code>ollama.com</code> → Settings → Keys.</li>
+            <li><b>Free keys:</b> Gemini at <code>aistudio.google.com/apikey</code>, Vibe AI (Mistral AI) at <code>console.mistral.ai/api-keys</code>, OpenRouter at <code>openrouter.ai/keys</code> (only free models are used), Groq at <code>console.groq.com/keys</code>, Ollama at <code>ollama.com</code> → Settings → Keys.</li>
           </ol>
         </details>
         ${status?.accessCodeRequired || s.accessCode ? `
@@ -338,10 +338,10 @@ export class SettingsModal {
           </div>
         </div>
         <label class="row">
-          <span class="row-text"><span class="row-title">Max response length</span><span class="row-sub">Server limit: ${maxOut.toLocaleString()} tokens.</span></span>
-          <select class="input input-sm" data-setting="maxTokens" data-kind="nullable-number">
-            <option value="" ${s.maxTokens == null ? 'selected' : ''}>Default</option>
-            ${[1024, 2048, 4096, 8192].filter((n) => n <= maxOut).map((n) => `<option value="${n}" ${s.maxTokens === n ? 'selected' : ''}>${n.toLocaleString()} tokens</option>`).join('')}
+          <span class="row-text"><span class="row-title">Response length</span><span class="row-sub">The most each reply can use. Longer replies use more of your token allowance.</span></span>
+          <select class="input input-sm" data-setting="responseLength">
+            <option value="short" ${s.responseLength === 'short' ? 'selected' : ''}>Short — up to ${lengths.short.toLocaleString()} tokens</option>
+            <option value="medium" ${s.responseLength !== 'short' ? 'selected' : ''}>Medium — up to ${lengths.medium.toLocaleString()} tokens</option>
           </select>
         </label>
       </div>
@@ -357,19 +357,22 @@ export class SettingsModal {
   #usageCard() {
     const q = this.getQuota();
     if (!q) {
-      return `<div class="usage-card is-empty">${icon('gauge', { size: 17 })}<span>Your daily usage appears here after your first message. Limits are set and enforced by the server.</span></div>`;
+      return `<div class="usage-card is-empty">${icon('gauge', { size: 17 })}<span>Your usage appears here after your first message. Limits are set and enforced by the server, and every AI counts toward the same limits.</span></div>`;
     }
     const pct = (a, b) => Math.min(100, Math.round((a / Math.max(1, b)) * 100));
     const reset = new Date(q.resetAt);
-    const resetText = Number.isNaN(reset.getTime()) ? '' : `Resets ${reset.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
+    const resetText = Number.isNaN(reset.getTime()) ? '' : `Day resets ${reset.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
     const bar = (label, used, limit, p) => `<div class="usage-row">
         <div class="usage-top"><span>${label}</span><span>${used.toLocaleString()} / ${limit.toLocaleString()}</span></div>
         <div class="usage-bar ${p >= 90 ? 'is-high' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}" aria-label="${label}"><span data-pct="${p}"></span></div>
       </div>`;
     return `<div class="usage-card">
-      <div class="usage-head"><b>${icon('gauge', { size: 16 })}Today’s usage</b><span>${escapeHtml(resetText)}</span></div>
-      ${bar('Messages', q.requestsUsed, q.requestsLimit, pct(q.requestsUsed, q.requestsLimit))}
-      ${bar('AI tokens', q.tokensUsed, q.tokensLimit, pct(q.tokensUsed, q.tokensLimit))}
+      <div class="usage-head"><b>${icon('gauge', { size: 16 })}Your usage</b><span>${escapeHtml(resetText)}</span></div>
+      ${bar('Messages today', q.requestsUsed, q.requestsLimit, pct(q.requestsUsed, q.requestsLimit))}
+      ${bar('Tokens today', q.tokensUsed, q.tokensLimit, pct(q.tokensUsed, q.tokensLimit))}
+      ${Number.isFinite(q.weekTokensLimit) ? bar('Tokens this week', q.weekTokensUsed, q.weekTokensLimit, pct(q.weekTokensUsed, q.weekTokensLimit)) : ''}
+      ${Number.isFinite(q.monthTokensLimit) ? bar('Tokens this month', q.monthTokensUsed, q.monthTokensLimit, pct(q.monthTokensUsed, q.monthTokensLimit)) : ''}
+      ${q.weekResetAt ? `<p class="usage-note">Daily limits reset at midnight UTC, weekly on Monday, monthly on the 1st.</p>` : ''}
     </div>`;
   }
 

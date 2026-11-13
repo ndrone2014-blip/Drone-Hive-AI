@@ -1,6 +1,7 @@
 import { getEnv, getEnvList } from '../../env.js';
 import { AIError, ERROR_CODES } from '../errors.js';
 import { openChatCompletions } from './openai-compatible.js';
+import { readProviderKey } from './keys.js';
 
 /**
  * OpenRouter provider — one key, hundreds of models (many of them free).
@@ -33,7 +34,9 @@ export const openRouterProvider = {
   capabilities: { streaming: true, vision: true, documents: false, tools: false },
 
   getConfig() {
-    const apiKey = getEnv('OPENROUTER_API_KEY');
+    // Netlify's AI Gateway can inject a placeholder OPENROUTER_API_KEY (see keys.js).
+    const found = readProviderKey(['OPENROUTER_API_KEY'], { baseUrlVar: 'OPENROUTER_BASE_URL', officialHost: /^https:\/\/openrouter\.ai(\/|$)/i });
+    const apiKey = found.apiKey;
     const allowPaid = getEnv('OPENROUTER_ALLOW_PAID', 'false') === 'true';
     let listed = getEnvList('OPENROUTER_MODELS') || DEFAULT_MODELS;
     let defaultModel = getEnv('OPENROUTER_MODEL', listed[0]);
@@ -45,7 +48,7 @@ export const openRouterProvider = {
     }
     let visionModels = getEnvList('OPENROUTER_VISION_MODELS') || DEFAULT_VISION_MODELS;
     if (!allowPaid) visionModels = visionModels.filter(isFreeOpenRouterModel);
-    return { configured: Boolean(apiKey), apiKey, baseUrl: BASE_URL, models, defaultModel, allowPaid, visionModels, maxImages: 4 };
+    return { configured: Boolean(apiKey), issue: found.issue, apiKey, baseUrl: BASE_URL, models, defaultModel, allowPaid, visionModels, maxImages: 4 };
   },
 
   async open({ model, system, messages, maxTokens, temperature, signal }) {

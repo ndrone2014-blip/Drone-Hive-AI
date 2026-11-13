@@ -80,6 +80,7 @@ label.row { cursor: pointer; }
 .usage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.82rem; color: var(--text-3); }
 .usage-head b { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 0.93rem; }
 .usage-head b .icon { color: var(--accent-text); }
+.usage-note { margin: 0; font-size: 0.78rem; color: var(--text-3); }
 .usage-top { display: flex; justify-content: space-between; font-size: 0.84rem; color: var(--text-2); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
 .usage-bar { height: 7px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .usage-bar span { display: block; height: 100%; border-radius: inherit; background: var(--gold); transition: width 400ms var(--ease); }

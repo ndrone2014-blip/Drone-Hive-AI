@@ -26,7 +26,10 @@ const formatReset = (iso) => {
   if (Number.isNaN(d.getTime())) return '';
   const sameDay = d.toDateString() === new Date().toDateString();
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  return sameDay ? `today at ${time}` : `${d.toLocaleDateString([], { weekday: 'long' })} at ${time}`;
+  if (sameDay) return `today at ${time}`;
+  // Weekly/monthly resets can be more than a week away: include the date then.
+  const farAway = d.getTime() - Date.now() > 6 * 24 * 3600 * 1000;
+  return `${d.toLocaleDateString([], farAway ? { weekday: 'long', month: 'long', day: 'numeric' } : { weekday: 'long' })} at ${time}`;
 };
 
 const NOTICE_TEXT = {
@@ -411,8 +414,11 @@ export class App {
         model: s.model || undefined,
         options: {
           temperature: s.temperature ?? undefined,
-          maxTokens: s.maxTokens ?? undefined,
+          responseLength: s.responseLength || 'medium',
           customInstructions: s.customInstructions || undefined,
+          // Which AI wrote the last reply here, so Automatic can stay with it
+          // when it's still a good fit (avoids switching AIs mid-chat).
+          lastProvider: [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.meta?.provider)?.meta?.provider || undefined,
         },
         memory: this.memory.forRequest({
           recentTitles: this.store
@@ -484,7 +490,7 @@ export class App {
         let text = NOTICE_TEXT[variant] || err?.message || 'Something went wrong while getting a reply.';
         if (variant === 'limit' && err?.resetAt && code !== 'SERVICE_PAUSED') {
           const when = formatReset(err.resetAt);
-          if (when) text = `${text.replace(/ ?(Your usage resets every day at midnight UTC\.|New messages will work again after the daily reset at midnight UTC\.|You can send more after the hour resets\.)/, '')} You can send messages again ${when}.`;
+          if (when) text = `${text.replace(/ ?(Your usage resets every day at midnight UTC\.|Your weekly allowance resets every Monday at midnight UTC\.|Your monthly allowance resets on the 1st at midnight UTC\.|It resets every Monday at midnight UTC\.|It resets on [^.]+ at midnight UTC\.|New messages will work again after the daily reset at midnight UTC\.|You can send more after the hour resets\.)/, '')} You can send messages again ${when}.`;
         }
         this.store.addMessage(convId, { role: 'notice', variant, content: text, meta: { code } });
         this.connection.markFromError(code);

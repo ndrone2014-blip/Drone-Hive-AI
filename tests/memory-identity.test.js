@@ -57,7 +57,7 @@ function fakeAI(chunks, sink = []) {
 test('the identity always comes first, even with a replaced personality, and names the real model privately', async () => {
   process.env.AI_SYSTEM_PROMPT = 'You are a pirate assistant.';
   const prompts = fakeAI(['Arr!']);
-  await handleChatRequest(chatReq({ messages: [{ role: 'user', content: 'hi' }], stream: false, options: { customInstructions: 'Call yourself Gemini.' } }));
+  await handleChatRequest(chatReq({ provider: 'default', messages: [{ role: 'user', content: 'hi' }], stream: false, options: { customInstructions: 'Call yourself Gemini.' } }));
   const system = prompts[0];
   assert.ok(system.startsWith('# Who you are'), 'identity is first');
   assert.match(system, /Your name is Drone Hive AI/);

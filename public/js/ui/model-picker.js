@@ -3,8 +3,8 @@ import { icon } from './icons.js';
 import { showMenu } from './overlays.js';
 import { AI_MODES } from '../config.js';
 
-/** Providers in the order Automatic mode uses them. */
-const MAIN = ['gemini', 'openrouter', 'groq', 'ollama'];
+/** The main providers, in Automatic mode's backup order. */
+const MAIN = ['gemini', 'mistral', 'openrouter', 'groq', 'ollama'];
 
 /**
  * Top-bar AI picker: Default, Automatic, or a specific provider.
@@ -19,18 +19,18 @@ export class ModelPicker {
     this.btn.addEventListener('click', () => this.open());
   }
 
-  /** The user's choice, falling back to Default if that provider disappeared. */
+  /** The user's choice, falling back to Automatic if that provider disappeared. */
   get choice() {
     const v = this.settings.get('provider');
     if (v === 'default' || v === 'automatic') return v;
     const p = this.connection.providers.find((x) => x.id === v);
-    return p?.configured ? v : this.connection.status ? 'default' : v;
+    return p?.configured ? v : this.connection.status ? 'automatic' : v;
   }
 
   label() {
     const c = this.choice;
     if (AI_MODES[c]) return AI_MODES[c].label;
-    return this.connection.providers.find((p) => p.id === c)?.shortName || 'Default';
+    return this.connection.providers.find((p) => p.id === c)?.shortName || 'Automatic';
   }
 
   /** Whether the current choice can read images. */
@@ -76,6 +76,7 @@ export class ModelPicker {
       this.btn,
       [
         { header: 'Mode' },
+        { label: AI_MODES.automatic.label, description: AI_MODES.automatic.description, icon: 'sparkle', checked: c === 'automatic', onSelect: () => set('automatic') },
         {
           label: AI_MODES.default.label,
           description: active ? `${AI_MODES.default.description} (${active.shortName || active.name})` : AI_MODES.default.description,
@@ -83,12 +84,17 @@ export class ModelPicker {
           checked: c === 'default',
           onSelect: () => set('default'),
         },
-        { label: AI_MODES.automatic.label, description: AI_MODES.automatic.description, icon: 'sparkle', checked: c === 'automatic', onSelect: () => set('automatic') },
         { separator: true },
         { header: 'Always use' },
         ...listed.map((p) => ({
           label: p.name,
-          description: !p.configured ? 'Not connected on this server' : p.capabilities?.vision ? 'Text and images' : 'Text only',
+          description: !p.configured
+            ? p.issue === 'gateway-placeholder'
+              ? 'Needs its own API key on the server'
+              : 'Not connected on this server'
+            : p.capabilities?.vision
+              ? 'Text and images'
+              : 'Text only',
           icon: 'cpu',
           checked: c === p.id,
           disabled: !p.configured,

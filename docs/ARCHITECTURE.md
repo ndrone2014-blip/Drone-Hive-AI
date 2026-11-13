@@ -57,7 +57,7 @@ Both sides use the same pure rules in `public/js/shared/memory-rules.js` (`sensi
 
 - `planRoute()` (no network) turns the user's mode into an ordered list of `{ provider, models }`:
   - **default** → `AI_PROVIDER` first (its configured model), then the automatic order as backup.
-  - **automatic** → `AUTO_ORDER` = Gemini, OpenRouter, Groq, Ollama. Providers on cooldown move to the back. `analyzeRequest()` decides the model order inside each provider (code model / big model / fast model; image-capable models only when the message has images).
+  - **automatic** (the standard mode; used when a request names no mode) → `AUTO_PREFERENCES[kind]` ranks the providers for the kind of message (code / vision / reasoning / long / chat), then `AUTO_ORDER` = Gemini, Vibe AI (Mistral), OpenRouter, Groq, Ollama, then any other connected provider. The provider that answered the previous message (`options.lastProvider`) is kept first when it's one of the top two picks. Providers on cooldown move to the back. `analyzeRequest()` decides the model order inside each provider (code model / big model / fast model; image-capable models only when the message has images).
   - **manual** → just that provider.
 - `runRoute()` opens one provider at a time and waits for the first text (`AI_FIRST_TOKEN_SECONDS`). Failure before any text → next model/provider. Failure after text → the error is reported; nothing is re-sent.
 - `<think>…</think>` reasoning some open models emit is stripped.
@@ -70,7 +70,7 @@ Both sides use the same pure rules in `public/js/shared/memory-rules.js` (`sensi
 
 | Feature | Where it plugs in |
 |---|---|
-| **New AI provider** | Copy `server/ai/providers/groq.js`, implement `getConfig()` (with `visionModels`) and `open()`, then add it to `providers/index.js`. To include it in Automatic mode, add its id to `AUTO_ORDER` in `router.js`. The menus pick it up from `/api/status`. |
+| **New AI provider** | Copy `server/ai/providers/groq.js`, implement `getConfig()` (with `visionModels`) and `open()`, then add it to `providers/index.js`. Read its key with `readProviderKey()` from `keys.js` (ignores Netlify AI Gateway placeholders). To include it in Automatic mode, add its id to `AUTO_ORDER` and to the `AUTO_PREFERENCES` lists in `router.js`. The menus pick it up from `/api/status`. |
 | **Multiple models** | Set `ANTHROPIC_MODELS` / `OPENAI_COMPAT_MODELS`. The model is chosen per request (`body.model`), so per-conversation models only need `conversation.model` in the store. |
 | **Images** | Done. A provider can read images when its `getConfig()` returns `visionModels`; `toOpenAIMessage()` converts them for OpenAI-format APIs. To add images to Anthropic, convert `m.images` to `{type:'image', source:{type:'base64', …}}` blocks in `anthropic.js` and set `visionModels`. |
 | **PDFs / documents** | Add a `{type:'document'}` part in `server/ai/messages.js` with the same validate-on-server approach as `validateImage()`, then convert it per provider. |
